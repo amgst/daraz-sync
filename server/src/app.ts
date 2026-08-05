@@ -9,6 +9,7 @@ import authRoutes from "./routes/auth.js";
 import darazRoutes from "./routes/daraz.js";
 import productsRoutes from "./routes/products.js";
 import ordersRoutes from "./routes/orders.js";
+import cronRoutes from "./routes/cron.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,6 +49,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/daraz", darazRoutes);
 app.use("/api/products", productsRoutes);
 app.use("/api/orders", ordersRoutes);
+app.use("/api/cron", cronRoutes);
 
 // Only relevant for persistent-process deployments (Railway, Render, a VPS)
 // where this server also serves the built client. On Vercel, static assets
