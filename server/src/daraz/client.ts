@@ -88,7 +88,11 @@ async function request<T = unknown>({
   } & Record<string, unknown>;
 
   // IOP-style APIs return HTTP 200 with an error `code` in the body on failure.
+  // The top-level message is often a generic wrapper (e.g. "Update product
+  // failed") - log the full response so the real cause (missing attribute,
+  // bad image, etc.) shows up in server logs instead of only that summary.
   if (json.code && json.code !== "0") {
+    console.error(`[daraz-sync] Daraz API error on ${apiPath}:`, JSON.stringify(json));
     throw new DarazApiError(json.message ?? "Daraz API error", json.code);
   }
 
