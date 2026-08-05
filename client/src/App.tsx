@@ -1,0 +1,57 @@
+import { Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "./AuthContext";
+import { ToastProvider } from "./ToastContext";
+import Layout from "./pages/Layout";
+import Login from "./pages/Login";
+import Dashboard from "./pages/Dashboard";
+import DarazConnection from "./pages/DarazConnection";
+import Products from "./pages/Products";
+import ProductForm from "./pages/ProductForm";
+import Orders from "./pages/Orders";
+import OrderDetail from "./pages/OrderDetail";
+
+function Protected({ children }: { children: React.ReactNode }) {
+  const { loggedIn } = useAuth();
+  if (loggedIn === null) return null;
+  if (!loggedIn) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function AppRoutes() {
+  const { loggedIn } = useAuth();
+
+  return (
+    <Routes>
+      <Route
+        path="/login"
+        element={loggedIn ? <Navigate to="/" replace /> : <Login />}
+      />
+      <Route
+        path="/"
+        element={
+          <Protected>
+            <Layout />
+          </Protected>
+        }
+      >
+        <Route index element={<Dashboard />} />
+        <Route path="daraz" element={<DarazConnection />} />
+        <Route path="products" element={<Products />} />
+        <Route path="products/new" element={<ProductForm />} />
+        <Route path="products/:id" element={<ProductForm />} />
+        <Route path="orders" element={<Orders />} />
+        <Route path="orders/:id" element={<OrderDetail />} />
+      </Route>
+    </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <ToastProvider>
+        <AppRoutes />
+      </ToastProvider>
+    </AuthProvider>
+  );
+}
