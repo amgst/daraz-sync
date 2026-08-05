@@ -1,16 +1,27 @@
-import { PrismaClient } from "@prisma/client";
+import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 
-declare global {
-  // eslint-disable-next-line no-var
-  var prismaGlobal: PrismaClient | undefined;
+// Firebase Admin credentials for server-side access to Firestore (Supabase's
+// replacement). FIREBASE_PRIVATE_KEY is stored with literal "\n" sequences
+// in env vars (Vercel, .env files), so they need converting to real newlines.
+function initFirebase() {
+  if (getApps().length) return;
+
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error(
+      "FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY environment variables are not set",
+    );
+  }
+
+  initializeApp({ credential: cert({ projectId, clientEmail, privateKey }) });
 }
 
-// SQLite + a single long-running Node process: one PrismaClient for the
-// life of the process is exactly right here, no serverless connection-pool
-// concerns like the old Postgres/pgbouncer setup had.
-const db = global.prismaGlobal ?? new PrismaClient();
-if (process.env.NODE_ENV !== "production") {
-  global.prismaGlobal = db;
-}
+initFirebase();
+
+const db = getFirestore();
 
 export default db;

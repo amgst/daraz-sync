@@ -1,26 +1,28 @@
 import { Router } from "express";
-import db from "../db.js";
+import { Timestamp } from "firebase-admin/firestore";
 import { requireAuth } from "../authMiddleware.js";
 import { createState, verifyState } from "../daraz/state.js";
 import { getAuthorizeUrl, exchangeCodeForToken, getCategoryTree } from "../daraz/client.js";
 import { encrypt } from "../daraz/crypto.js";
 import { getValidAccessToken } from "../daraz/tokens.js";
 import { isDarazCountry, DARAZ_SITES } from "../daraz/countries.js";
+import { accountRef, type DarazAccountDoc } from "../daraz/models.js";
 
 const router = Router();
 
 router.get("/status", requireAuth, async (_req, res) => {
-  const account = await db.darazAccount.findUnique({ where: { id: "singleton" } });
-  if (!account) {
+  const snap = await accountRef.get();
+  if (!snap.exists) {
     res.json({ connected: false });
     return;
   }
+  const account = snap.data() as DarazAccountDoc;
   res.json({
     connected: true,
     country: account.country,
     countryLabel: isDarazCountry(account.country) ? DARAZ_SITES[account.country].label : account.country,
     sellerId: account.sellerId,
-    connectedAt: account.connectedAt,
+    connectedAt: account.connectedAt.toDate().toISOString(),
   });
 });
 
@@ -55,27 +57,20 @@ router.get("/callback", async (req, res) => {
   try {
     const token = await exchangeCodeForToken(code, verified.country);
     const sellerId = token.country_user_info?.[0]?.seller_id ?? null;
+    const now = Timestamp.now();
 
-    await db.darazAccount.upsert({
-      where: { id: "singleton" },
-      create: {
-        id: "singleton",
-        country: verified.country,
-        sellerId,
-        accessTokenEnc: encrypt(token.access_token),
-        refreshTokenEnc: encrypt(token.refresh_token),
-        tokenExpiresAt: new Date(Date.now() + token.expires_in * 1000),
-        refreshTokenExpiresAt: new Date(Date.now() + token.refresh_expires_in * 1000),
-      },
-      update: {
-        country: verified.country,
-        sellerId,
-        accessTokenEnc: encrypt(token.access_token),
-        refreshTokenEnc: encrypt(token.refresh_token),
-        tokenExpiresAt: new Date(Date.now() + token.expires_in * 1000),
-        refreshTokenExpiresAt: new Date(Date.now() + token.refresh_expires_in * 1000),
-      },
-    });
+    const existing = await accountRef.get();
+    const data: DarazAccountDoc = {
+      country: verified.country,
+      sellerId,
+      accessTokenEnc: encrypt(token.access_token),
+      refreshTokenEnc: encrypt(token.refresh_token),
+      tokenExpiresAt: Timestamp.fromMillis(Date.now() + token.expires_in * 1000),
+      refreshTokenExpiresAt: Timestamp.fromMillis(Date.now() + token.refresh_expires_in * 1000),
+      connectedAt: existing.exists ? (existing.data() as DarazAccountDoc).connectedAt : now,
+      updatedAt: now,
+    };
+    await accountRef.set(data);
 
     res.redirect(`${process.env.CLIENT_URL}/daraz?connected=1`);
   } catch (error) {
@@ -85,7 +80,7 @@ router.get("/callback", async (req, res) => {
 });
 
 router.post("/disconnect", requireAuth, async (_req, res) => {
-  await db.darazAccount.deleteMany({ where: { id: "singleton" } });
+  await accountRef.delete();
   res.json({ ok: true });
 });
 

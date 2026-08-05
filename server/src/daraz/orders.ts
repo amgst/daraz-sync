@@ -1,6 +1,8 @@
-import db from "../db.js";
+import { randomUUID } from "node:crypto";
+import { Timestamp } from "firebase-admin/firestore";
 import { getValidAccessToken } from "./tokens.js";
 import { getOrders, getOrderItems } from "./client.js";
+import { ordersCol, type OrderDoc, type OrderItemDoc } from "./models.js";
 
 export interface ImportOrdersResult {
   imported: number;
@@ -8,7 +10,8 @@ export interface ImportOrdersResult {
 }
 
 // Pulls orders from Daraz into this app's own DB for viewing - read-only,
-// nothing is pushed anywhere else from here.
+// nothing is pushed anywhere else from here. Doc id = Daraz's own order id,
+// so this is a plain upsert-by-id.
 export async function importDarazOrders(): Promise<ImportOrdersResult> {
   const darazSession = await getValidAccessToken();
   if (!darazSession) {
@@ -26,60 +29,41 @@ export async function importDarazOrders(): Promise<ImportOrdersResult> {
 
   for (const order of orders) {
     const items = await getOrderItems(darazOpts, order.orderId);
+    const docRef = ordersCol.doc(order.orderId);
+    const existing = await docRef.get();
+    const now = Timestamp.now();
 
-    const existing = await db.darazOrder.findUnique({
-      where: { darazOrderId: order.orderId },
-    });
+    const itemDocs: OrderItemDoc[] = items.map((item) => ({
+      id: randomUUID(),
+      darazOrderItemId: item.orderItemId,
+      sku: item.sku ?? null,
+      name: item.name ?? null,
+      imageUrl: item.imageUrl ?? null,
+      price: item.price ?? null,
+      currency: item.currency ?? null,
+      status: item.status ?? null,
+    }));
 
-    const data = {
-      orderNumber: order.orderNumber,
-      customerName: order.customerName,
+    const fields = {
+      darazOrderId: order.orderId,
+      orderNumber: order.orderNumber ?? null,
+      customerName: order.customerName ?? null,
       status: order.status,
       itemsCount: order.itemsCount,
-      totalAmount: order.totalAmount,
-      currency: order.currency,
-      darazCreatedAt: order.createdAt ? new Date(order.createdAt) : null,
-      darazUpdatedAt: order.updatedAt ? new Date(order.updatedAt) : null,
+      totalAmount: order.totalAmount ?? null,
+      currency: order.currency ?? null,
+      darazCreatedAt: order.createdAt ? Timestamp.fromDate(new Date(order.createdAt)) : null,
+      darazUpdatedAt: order.updatedAt ? Timestamp.fromDate(new Date(order.updatedAt)) : null,
+      items: itemDocs,
+      updatedAt: now,
     };
 
-    if (existing) {
-      await db.darazOrderItem.deleteMany({ where: { orderId: existing.id } });
-      await db.darazOrder.update({
-        where: { id: existing.id },
-        data: {
-          ...data,
-          items: {
-            create: items.map((item) => ({
-              darazOrderItemId: item.orderItemId,
-              sku: item.sku,
-              name: item.name,
-              imageUrl: item.imageUrl,
-              price: item.price,
-              currency: item.currency,
-              status: item.status,
-            })),
-          },
-        },
-      });
+    if (existing.exists) {
+      await docRef.update(fields);
       updated++;
     } else {
-      await db.darazOrder.create({
-        data: {
-          darazOrderId: order.orderId,
-          ...data,
-          items: {
-            create: items.map((item) => ({
-              darazOrderItemId: item.orderItemId,
-              sku: item.sku,
-              name: item.name,
-              imageUrl: item.imageUrl,
-              price: item.price,
-              currency: item.currency,
-              status: item.status,
-            })),
-          },
-        },
-      });
+      const data: OrderDoc = { ...fields, importedAt: now };
+      await docRef.set(data);
       imported++;
     }
   }

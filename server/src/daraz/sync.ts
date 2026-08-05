@@ -1,4 +1,5 @@
-import db from "../db.js";
+import { randomUUID } from "node:crypto";
+import { Timestamp } from "firebase-admin/firestore";
 import { getValidAccessToken } from "./tokens.js";
 import {
   createProduct,
@@ -10,9 +11,7 @@ import {
   type CreateProductInput,
   type DarazSkuDetail,
 } from "./client.js";
-import type { Product, ProductVariant } from "@prisma/client";
-
-type ProductWithVariants = Product & { variants: ProductVariant[] };
+import { productsCol, type ProductDoc, type VariantDoc } from "./models.js";
 
 async function uploadProductImages(
   darazOpts: { accessToken: string; country: string },
@@ -36,20 +35,15 @@ export async function syncProduct(
   productId: string,
   type: "create" | "update" | "price_qty",
 ): Promise<void> {
-  const product = (await db.product.findUnique({
-    where: { id: productId },
-    include: { variants: true },
-  })) as ProductWithVariants | null;
-
-  if (!product) {
+  const docRef = productsCol.doc(productId);
+  const snap = await docRef.get();
+  if (!snap.exists) {
     throw new Error(`Product ${productId} not found`);
   }
+  const product = snap.data() as ProductDoc;
 
   if (!product.darazCategoryId || !product.attributesJson) {
-    await db.product.update({
-      where: { id: productId },
-      data: { syncStatus: "unmapped" },
-    });
+    await docRef.update({ syncStatus: "unmapped", updatedAt: Timestamp.now() });
     throw new Error(
       "Product has no Daraz category/attribute mapping yet - map it before syncing",
     );
@@ -75,10 +69,7 @@ export async function syncProduct(
         quantity: String(variant.quantity),
       })),
     );
-    await db.product.update({
-      where: { id: productId },
-      data: { syncStatus: "synced", lastSyncedAt: new Date(), lastError: null },
-    });
+    await docRef.update({ syncStatus: "synced", lastSyncedAt: Timestamp.now(), lastError: null, updatedAt: Timestamp.now() });
     return;
   }
 
@@ -101,22 +92,17 @@ export async function syncProduct(
 
   if (product.darazItemId) {
     await updateProduct(darazOpts, product.darazItemId, input);
-    await db.product.update({
-      where: { id: productId },
-      data: { syncStatus: "synced", lastSyncedAt: new Date(), lastError: null },
-    });
+    await docRef.update({ syncStatus: "synced", lastSyncedAt: Timestamp.now(), lastError: null, updatedAt: Timestamp.now() });
   } else {
     const created = await createProduct(darazOpts, input);
     const firstSku = created.sku_list[0];
-    await db.product.update({
-      where: { id: productId },
-      data: {
-        darazItemId: created.item_id,
-        darazSkuId: firstSku?.SkuId ?? null,
-        syncStatus: "synced",
-        lastSyncedAt: new Date(),
-        lastError: null,
-      },
+    await docRef.update({
+      darazItemId: created.item_id,
+      darazSkuId: firstSku?.SkuId ?? null,
+      syncStatus: "synced",
+      lastSyncedAt: Timestamp.now(),
+      lastError: null,
+      updatedAt: Timestamp.now(),
     });
   }
 }
@@ -145,33 +131,38 @@ export async function importDarazProduct(darazItemId: string): Promise<ImportRes
     warnings.push("Daraz returned no images for this product");
   }
 
-  const product = await db.product.create({
-    data: {
-      title: detail.name,
-      descriptionHtml: detail.description,
-      vendor: detail.brand ?? undefined,
-      imagesJson: JSON.stringify(detail.images),
-      darazItemId: detail.item_id,
-      darazSkuId: detail.skus[0]?.SkuId ?? null,
-      darazCategoryId: detail.primary_category,
-      syncStatus: "synced",
-      lastSyncedAt: new Date(),
-      variants: {
-        create: detail.skus.map((sku: DarazSkuDetail) => {
-          const { price, compareAtPrice } = effectivePrice(sku);
-          return {
-            sku: sku.SellerSku,
-            price,
-            compareAtPrice: compareAtPrice ?? undefined,
-            quantity: Number(sku.quantity ?? 0),
-            packageWeightKg: sku.packageWeightKg ?? undefined,
-          };
-        }),
-      },
-    },
-  });
+  const now = Timestamp.now();
+  const docRef = productsCol.doc();
+  const data: ProductDoc = {
+    title: detail.name,
+    descriptionHtml: detail.description ?? null,
+    vendor: detail.brand ?? null,
+    imagesJson: JSON.stringify(detail.images),
+    darazItemId: detail.item_id,
+    darazSkuId: detail.skus[0]?.SkuId ?? null,
+    darazCategoryId: detail.primary_category,
+    attributesJson: null,
+    syncStatus: "synced",
+    lastSyncedAt: now,
+    lastError: null,
+    createdAt: now,
+    updatedAt: now,
+    variants: detail.skus.map((sku: DarazSkuDetail) => {
+      const { price, compareAtPrice } = effectivePrice(sku);
+      return {
+        id: randomUUID(),
+        sku: sku.SellerSku,
+        price,
+        compareAtPrice: compareAtPrice ?? null,
+        quantity: Number(sku.quantity ?? 0),
+        packageWeightKg: sku.packageWeightKg ?? null,
+      };
+    }),
+  };
 
-  return { productId: product.id, warnings };
+  await docRef.set(data);
+
+  return { productId: docRef.id, warnings };
 }
 
 export interface PullResult {
@@ -195,59 +186,54 @@ export async function pullPriceStockFromDaraz(): Promise<PullResult> {
     country: darazSession.country,
   };
 
-  const products = await db.product.findMany({
-    where: { darazItemId: { not: null } },
-    include: { variants: true },
-  });
+  const snap = await productsCol.get();
+  const products = snap.docs.filter((d) => (d.data() as ProductDoc).darazItemId);
 
   const result: PullResult = { productsChecked: 0, productsUpdated: 0, errors: [] };
 
-  for (const product of products) {
+  for (const doc of products) {
+    const product = doc.data() as ProductDoc;
     result.productsChecked++;
     try {
       const detail = await getProductDetail(darazOpts, product.darazItemId!);
-      const variantBySku = new Map(product.variants.map((v) => [v.sku, v]));
+      const skuByName = new Map(detail.skus.map((sku) => [sku.SellerSku, sku]));
 
       let updated = false;
-      for (const sku of detail.skus) {
-        const variant = variantBySku.get(sku.SellerSku);
-        if (!variant) continue;
+      const newVariants: VariantDoc[] = product.variants.map((variant) => {
+        const sku = skuByName.get(variant.sku);
+        if (!sku) return variant;
 
         const { price, compareAtPrice } = effectivePrice(sku);
         const quantity = Number(sku.quantity ?? 0);
         const changed =
           price !== variant.price ||
-          (compareAtPrice ?? null) !== (variant.compareAtPrice ?? null) ||
+          (compareAtPrice ?? null) !== variant.compareAtPrice ||
           (Number.isFinite(quantity) && quantity !== variant.quantity);
 
-        if (changed) {
-          await db.productVariant.update({
-            where: { id: variant.id },
-            data: {
-              price,
-              compareAtPrice: compareAtPrice ?? null,
-              ...(Number.isFinite(quantity) ? { quantity } : {}),
-            },
-          });
-          updated = true;
-        }
-      }
+        if (!changed) return variant;
+        updated = true;
+        return {
+          ...variant,
+          price,
+          compareAtPrice: compareAtPrice ?? null,
+          quantity: Number.isFinite(quantity) ? quantity : variant.quantity,
+        };
+      });
 
       if (updated) {
         result.productsUpdated++;
       }
 
-      await db.product.update({
-        where: { id: product.id },
-        data: { lastSyncedAt: new Date(), lastError: null },
+      await doc.ref.update({
+        variants: newVariants,
+        lastSyncedAt: Timestamp.now(),
+        lastError: null,
+        updatedAt: Timestamp.now(),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       result.errors.push(`${product.title}: ${message}`);
-      await db.product.update({
-        where: { id: product.id },
-        data: { lastError: message },
-      });
+      await doc.ref.update({ lastError: message, updatedAt: Timestamp.now() });
     }
   }
 

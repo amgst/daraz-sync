@@ -1,19 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import db from "../db.js";
+import { Timestamp } from "firebase-admin/firestore";
 import { requireAuth } from "../authMiddleware.js";
 import { syncProduct, importDarazProduct, pullPriceStockFromDaraz } from "../daraz/sync.js";
 import { getValidAccessToken } from "../daraz/tokens.js";
 import { getCategoryAttributes, getProducts as searchDarazProducts } from "../daraz/client.js";
+import { productsCol, serializeProduct, type ProductDoc, type VariantDoc } from "../daraz/models.js";
 
 const router = Router();
 router.use(requireAuth);
 
 router.get("/", async (_req, res) => {
-  const products = await db.product.findMany({
-    include: { variants: true },
-    orderBy: { updatedAt: "desc" },
-  });
-  res.json({ products });
+  const snap = await productsCol.orderBy("updatedAt", "desc").get();
+  res.json({ products: snap.docs.map((d) => serializeProduct(d.id, d.data() as ProductDoc)) });
 });
 
 router.post("/", async (req, res) => {
@@ -30,37 +29,44 @@ router.post("/", async (req, res) => {
     return;
   }
 
-  const product = await db.product.create({
-    data: {
-      title,
-      descriptionHtml,
-      vendor,
-      imagesJson: JSON.stringify(images ?? []),
-      variants: {
-        create: variants.map((v) => ({
-          sku: v.sku,
-          price: v.price,
-          compareAtPrice: v.compareAtPrice,
-          quantity: v.quantity ?? 0,
-        })),
-      },
-    },
-    include: { variants: true },
-  });
+  const now = Timestamp.now();
+  const docRef = productsCol.doc();
+  const data: ProductDoc = {
+    title,
+    descriptionHtml: descriptionHtml ?? null,
+    vendor: vendor ?? null,
+    imagesJson: JSON.stringify(images ?? []),
+    darazCategoryId: null,
+    attributesJson: null,
+    darazItemId: null,
+    darazSkuId: null,
+    syncStatus: "unmapped",
+    lastSyncedAt: null,
+    lastError: null,
+    createdAt: now,
+    updatedAt: now,
+    variants: variants.map((v) => ({
+      id: randomUUID(),
+      sku: v.sku,
+      price: v.price,
+      compareAtPrice: v.compareAtPrice ?? null,
+      quantity: v.quantity ?? 0,
+      packageWeightKg: null,
+    })),
+  };
 
-  res.status(201).json({ product });
+  await docRef.set(data);
+
+  res.status(201).json({ product: serializeProduct(docRef.id, data) });
 });
 
 router.get("/:id", async (req, res) => {
-  const product = await db.product.findUnique({
-    where: { id: req.params.id },
-    include: { variants: true },
-  });
-  if (!product) {
+  const snap = await productsCol.doc(req.params.id).get();
+  if (!snap.exists) {
     res.status(404).json({ error: "Product not found" });
     return;
   }
-  res.json({ product });
+  res.json({ product: serializeProduct(snap.id, snap.data() as ProductDoc) });
 });
 
 router.put("/:id", async (req, res) => {
@@ -72,46 +78,42 @@ router.put("/:id", async (req, res) => {
     variants?: Array<{ id?: string; sku: string; price: string; quantity: number; compareAtPrice?: string }>;
   };
 
-  const existing = await db.product.findUnique({ where: { id: req.params.id } });
-  if (!existing) {
+  const docRef = productsCol.doc(req.params.id);
+  const existing = await docRef.get();
+  if (!existing.exists) {
     res.status(404).json({ error: "Product not found" });
     return;
   }
 
-  await db.product.update({
-    where: { id: req.params.id },
-    data: {
-      ...(title !== undefined ? { title } : {}),
-      ...(descriptionHtml !== undefined ? { descriptionHtml } : {}),
-      ...(vendor !== undefined ? { vendor } : {}),
-      ...(images !== undefined ? { imagesJson: JSON.stringify(images) } : {}),
-    },
-  });
+  const update: Record<string, unknown> = { updatedAt: Timestamp.now() };
+  if (title !== undefined) update.title = title;
+  if (descriptionHtml !== undefined) update.descriptionHtml = descriptionHtml;
+  if (vendor !== undefined) update.vendor = vendor;
+  if (images !== undefined) update.imagesJson = JSON.stringify(images);
 
   if (variants) {
     // Replace the variant set wholesale - simplest correct behavior for a
     // small personal catalog rather than diffing add/update/remove.
-    await db.productVariant.deleteMany({ where: { productId: req.params.id } });
-    await db.productVariant.createMany({
-      data: variants.map((v) => ({
-        productId: req.params.id,
+    update.variants = variants.map(
+      (v): VariantDoc => ({
+        id: randomUUID(),
         sku: v.sku,
         price: v.price,
-        compareAtPrice: v.compareAtPrice,
+        compareAtPrice: v.compareAtPrice ?? null,
         quantity: v.quantity ?? 0,
-      })),
-    });
+        packageWeightKg: null,
+      }),
+    );
   }
 
-  const product = await db.product.findUnique({
-    where: { id: req.params.id },
-    include: { variants: true },
-  });
-  res.json({ product });
+  await docRef.update(update);
+
+  const updated = await docRef.get();
+  res.json({ product: serializeProduct(updated.id, updated.data() as ProductDoc) });
 });
 
 router.delete("/:id", async (req, res) => {
-  await db.product.delete({ where: { id: req.params.id } }).catch(() => null);
+  await productsCol.doc(req.params.id).delete();
   res.json({ ok: true });
 });
 
@@ -122,17 +124,17 @@ router.put("/:id/mapping", async (req, res) => {
     attributes: Record<string, string>;
   };
 
-  const product = await db.product.update({
-    where: { id: req.params.id },
-    data: {
-      darazCategoryId: categoryId,
-      attributesJson: JSON.stringify(attributes ?? {}),
-      syncStatus: "pending",
-      lastError: null,
-    },
+  const docRef = productsCol.doc(req.params.id);
+  await docRef.update({
+    darazCategoryId: categoryId,
+    attributesJson: JSON.stringify(attributes ?? {}),
+    syncStatus: "pending",
+    lastError: null,
+    updatedAt: Timestamp.now(),
   });
 
-  res.json({ product });
+  const updated = await docRef.get();
+  res.json({ product: serializeProduct(updated.id, updated.data() as ProductDoc) });
 });
 
 // Link an already-listed Daraz product to this local product instead of
@@ -144,25 +146,26 @@ router.post("/:id/link", async (req, res) => {
     darazSkuId?: string;
   };
 
-  const product = await db.product.update({
-    where: { id: req.params.id },
-    data: {
-      darazItemId,
-      darazCategoryId: darazCategoryId ?? null,
-      darazSkuId: darazSkuId ?? null,
-      syncStatus: "synced",
-      lastSyncedAt: new Date(),
-      lastError: null,
-    },
+  const docRef = productsCol.doc(req.params.id);
+  await docRef.update({
+    darazItemId,
+    darazCategoryId: darazCategoryId ?? null,
+    darazSkuId: darazSkuId ?? null,
+    syncStatus: "synced",
+    lastSyncedAt: Timestamp.now(),
+    lastError: null,
+    updatedAt: Timestamp.now(),
   });
 
-  res.json({ product });
+  const updated = await docRef.get();
+  res.json({ product: serializeProduct(updated.id, updated.data() as ProductDoc) });
 });
 
 router.post("/:id/sync", async (req, res) => {
   try {
-    const existing = await db.product.findUnique({ where: { id: req.params.id } });
-    await syncProduct(req.params.id, existing?.darazItemId ? "update" : "create");
+    const existing = await productsCol.doc(req.params.id).get();
+    const product = existing.data() as ProductDoc | undefined;
+    await syncProduct(req.params.id, product?.darazItemId ? "update" : "create");
     res.json({ ok: true });
   } catch (error) {
     res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
