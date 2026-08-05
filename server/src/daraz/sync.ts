@@ -7,6 +7,7 @@ import {
   updatePriceQuantity,
   uploadImage,
   getProductDetail,
+  getProducts,
   effectivePrice,
   type CreateProductInput,
   type DarazSkuDetail,
@@ -163,6 +164,64 @@ export async function importDarazProduct(darazItemId: string): Promise<ImportRes
   await docRef.set(data);
 
   return { productId: docRef.id, warnings };
+}
+
+export interface ImportAllResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
+// Bulk version of importDarazProduct - pages through the seller's entire
+// Daraz catalog and imports anything not already linked to a local product.
+// Idempotent (matches on darazItemId), so it's safe to re-run if it gets cut
+// off partway (e.g. a serverless function timeout on a large catalog) - it
+// picks up where it left off instead of duplicating.
+export async function importAllDarazProducts(): Promise<ImportAllResult> {
+  const darazSession = await getValidAccessToken();
+  if (!darazSession) {
+    throw new Error("No connected Daraz account");
+  }
+  const darazOpts = {
+    accessToken: darazSession.accessToken,
+    country: darazSession.country,
+  };
+
+  const existingSnap = await productsCol.get();
+  const linkedItemIds = new Set(
+    existingSnap.docs
+      .map((d) => (d.data() as ProductDoc).darazItemId)
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  const result: ImportAllResult = { imported: 0, skipped: 0, errors: [] };
+  const limit = 50;
+  let offset = 0;
+
+  while (true) {
+    const batch = await getProducts(darazOpts, { limit, offset });
+    if (batch.length === 0) break;
+
+    for (const item of batch) {
+      if (linkedItemIds.has(item.item_id)) {
+        result.skipped++;
+        continue;
+      }
+      try {
+        await importDarazProduct(item.item_id);
+        linkedItemIds.add(item.item_id);
+        result.imported++;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result.errors.push(`${item.item_id}: ${message}`);
+      }
+    }
+
+    if (batch.length < limit) break;
+    offset += limit;
+  }
+
+  return result;
 }
 
 export interface PullResult {

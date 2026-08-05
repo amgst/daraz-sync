@@ -6,6 +6,7 @@ import { useToast } from "../ToastContext";
 export default function Products() {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [pulling, setPulling] = useState(false);
+  const [importingAll, setImportingAll] = useState(false);
   const toast = useToast();
 
   const load = () => api.get<{ products: Product[] }>("/products").then((r) => setProducts(r.products));
@@ -32,6 +33,25 @@ export default function Products() {
     }
   };
 
+  const importAllFromDaraz = async () => {
+    setImportingAll(true);
+    try {
+      const result = await api.post<{ imported: number; skipped: number; errors: string[] }>(
+        "/products/import-all",
+      );
+      toast.show(
+        `Imported ${result.imported} product(s) from Daraz, skipped ${result.skipped} already linked` +
+          (result.errors.length ? ` (${result.errors.length} failed)` : ""),
+        { isError: result.errors.length > 0 },
+      );
+      await load();
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : "Import failed", { isError: true });
+    } finally {
+      setImportingAll(false);
+    }
+  };
+
   if (!products) return null;
 
   return (
@@ -43,6 +63,18 @@ export default function Products() {
         <Link to="/products/new">
           <button className="primary">New product</button>
         </Link>
+      </div>
+
+      <div className="card">
+        <div className="row between">
+          <p style={{ margin: 0 }}>
+            Already have products listed on Daraz? Import your whole catalog as local products in
+            one go - already-linked products are skipped, so this is safe to re-run.
+          </p>
+          <button onClick={importAllFromDaraz} disabled={importingAll}>
+            {importingAll ? "Importing..." : "Import all from Daraz"}
+          </button>
+        </div>
       </div>
 
       <div className="card">

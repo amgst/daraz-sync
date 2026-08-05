@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { Timestamp } from "firebase-admin/firestore";
 import { requireAuth } from "../authMiddleware.js";
-import { syncProduct, importDarazProduct, pullPriceStockFromDaraz } from "../daraz/sync.js";
+import { syncProduct, importDarazProduct, importAllDarazProducts, pullPriceStockFromDaraz } from "../daraz/sync.js";
 import { getValidAccessToken } from "../daraz/tokens.js";
 import { getCategoryAttributes, getProducts as searchDarazProducts } from "../daraz/client.js";
 import { productsCol, serializeProduct, type ProductDoc, type VariantDoc } from "../daraz/models.js";
@@ -221,6 +221,15 @@ router.post("/import", async (req, res) => {
   const { darazItemId } = req.body as { darazItemId: string };
   try {
     const result = await importDarazProduct(darazItemId);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+router.post("/import-all", async (_req, res) => {
+  try {
+    const result = await importAllDarazProducts();
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
