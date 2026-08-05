@@ -59,8 +59,20 @@ export async function syncProduct(
     country: darazSession.country,
   };
 
+  // Daraz requires each Sku's own SkuId (its internal id, distinct from our
+  // SellerSku) on both update endpoints below, or it rejects with a generic
+  // "mandatory field" error. Fetch it live rather than trusting a locally
+  // cached value, so this works for products synced here from the start and
+  // for ones only linked/imported (which never had a per-variant id stored).
+  async function skuIdsBySellerSku(): Promise<Map<string, string>> {
+    if (!product.darazItemId) return new Map();
+    const detail = await getProductDetail(darazOpts, product.darazItemId);
+    return new Map(detail.skus.map((s) => [s.SellerSku, s.SkuId]));
+  }
+
   // Fast path: only price/quantity changed and the product already exists on Daraz.
   if (type === "price_qty" && product.darazItemId) {
+    const skuIds = await skuIdsBySellerSku();
     await updatePriceQuantity(
       darazOpts,
       product.darazItemId,
@@ -68,6 +80,7 @@ export async function syncProduct(
         SellerSku: variant.sku,
         price: variant.price,
         quantity: String(variant.quantity),
+        SkuId: skuIds.get(variant.sku),
       })),
     );
     await docRef.update({ syncStatus: "synced", lastSyncedAt: Timestamp.now(), lastError: null, updatedAt: Timestamp.now() });
@@ -76,6 +89,7 @@ export async function syncProduct(
 
   const imageUrls = JSON.parse(product.imagesJson) as string[];
   const darazImageUrls = await uploadProductImages(darazOpts, imageUrls);
+  const skuIds = await skuIdsBySellerSku();
 
   const input: CreateProductInput = {
     primaryCategoryId: product.darazCategoryId,
@@ -88,6 +102,7 @@ export async function syncProduct(
       price: variant.price,
       quantity: String(variant.quantity),
       Images: darazImageUrls,
+      ...(skuIds.has(variant.sku) ? { SkuId: skuIds.get(variant.sku) } : {}),
     })),
   };
 

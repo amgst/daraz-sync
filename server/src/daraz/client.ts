@@ -224,12 +224,12 @@ export async function updateProduct(
 export async function updatePriceQuantity(
   { accessToken, country }: DarazProductClientOptions,
   itemId: string,
-  skus: Array<{ SellerSku: string; price: string; quantity: string }>,
+  skus: Array<{ SellerSku: string; price: string; quantity: string; SkuId?: string }>,
 ): Promise<void> {
   const skusXml = skus
     .map(
       (sku) =>
-        `<Sku><SellerSku>${escapeXml(sku.SellerSku)}</SellerSku><price>${sku.price}</price><quantity>${sku.quantity}</quantity></Sku>`,
+        `<Sku>${sku.SkuId ? `<SkuId>${escapeXml(sku.SkuId)}</SkuId>` : ""}<SellerSku>${escapeXml(sku.SellerSku)}</SellerSku><price>${sku.price}</price><quantity>${sku.quantity}</quantity></Sku>`,
     )
     .join("");
   const payload = `<Request><Product><Item><ItemId>${itemId}</ItemId></Item><Skus>${skusXml}</Skus></Product></Request>`;
