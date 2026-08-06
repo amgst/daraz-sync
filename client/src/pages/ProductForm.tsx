@@ -9,9 +9,16 @@ interface VariantRow {
   price: string;
   compareAtPrice: string;
   quantity: string;
+  packageWeightKg: string;
 }
 
-const emptyVariant = (): VariantRow => ({ sku: "", price: "", compareAtPrice: "", quantity: "0" });
+const emptyVariant = (): VariantRow => ({
+  sku: "",
+  price: "",
+  compareAtPrice: "",
+  quantity: "0",
+  packageWeightKg: "",
+});
 
 export default function ProductForm() {
   const { id } = useParams();
@@ -53,6 +60,7 @@ export default function ProductForm() {
               price: v.price,
               compareAtPrice: v.compareAtPrice ?? "",
               quantity: String(v.quantity),
+              packageWeightKg: v.packageWeightKg != null ? String(v.packageWeightKg) : "",
             }))
           : [emptyVariant()],
       );
@@ -84,6 +92,7 @@ export default function ProductForm() {
           price: v.price.trim(),
           compareAtPrice: v.compareAtPrice.trim() || undefined,
           quantity: Number(v.quantity) || 0,
+          packageWeightKg: v.packageWeightKg.trim() ? Number(v.packageWeightKg) : undefined,
         })),
     };
     try {
@@ -217,6 +226,7 @@ export default function ProductForm() {
                   <th>Price</th>
                   <th>Compare-at</th>
                   <th>Quantity</th>
+                  <th>Weight (kg)</th>
                   <th></th>
                 </tr>
               </thead>
@@ -241,6 +251,14 @@ export default function ProductForm() {
                         type="number"
                         value={v.quantity}
                         onChange={(e) => updateVariant(i, "quantity", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={v.packageWeightKg}
+                        onChange={(e) => updateVariant(i, "packageWeightKg", e.target.value)}
                       />
                     </td>
                     <td>

@@ -104,6 +104,7 @@ export async function syncProduct(
         quantity: String(variant.quantity),
         Images: darazImageUrls,
         ...(skuIds.has(variant.sku) ? { SkuId: skuIds.get(variant.sku) } : {}),
+        ...(variant.packageWeightKg != null ? { package_weight: String(variant.packageWeightKg) } : {}),
       })),
     };
 

@@ -21,7 +21,13 @@ router.post("/", async (req, res) => {
     descriptionHtml?: string;
     vendor?: string;
     images?: string[];
-    variants: Array<{ sku: string; price: string; quantity: number; compareAtPrice?: string }>;
+    variants: Array<{
+      sku: string;
+      price: string;
+      quantity: number;
+      compareAtPrice?: string;
+      packageWeightKg?: number;
+    }>;
   };
 
   if (!title || !variants?.length) {
@@ -51,7 +57,7 @@ router.post("/", async (req, res) => {
       price: v.price,
       compareAtPrice: v.compareAtPrice ?? null,
       quantity: v.quantity ?? 0,
-      packageWeightKg: null,
+      packageWeightKg: v.packageWeightKg ?? null,
     })),
   };
 
@@ -75,7 +81,14 @@ router.put("/:id", async (req, res) => {
     descriptionHtml?: string;
     vendor?: string;
     images?: string[];
-    variants?: Array<{ id?: string; sku: string; price: string; quantity: number; compareAtPrice?: string }>;
+    variants?: Array<{
+      id?: string;
+      sku: string;
+      price: string;
+      quantity: number;
+      compareAtPrice?: string;
+      packageWeightKg?: number;
+    }>;
   };
 
   const docRef = productsCol.doc(req.params.id);
@@ -101,7 +114,7 @@ router.put("/:id", async (req, res) => {
         price: v.price,
         compareAtPrice: v.compareAtPrice ?? null,
         quantity: v.quantity ?? 0,
-        packageWeightKg: null,
+        packageWeightKg: v.packageWeightKg ?? null,
       }),
     );
   }
