@@ -53,7 +53,9 @@ export default function ProductForm() {
 
   const [product, setProduct] = useState<Product | null>(null);
   const [categoryId, setCategoryId] = useState("");
-  const [attrPairs, setAttrPairs] = useState<Array<{ key: string; value: string; mandatory?: boolean }>>([]);
+  const [attrPairs, setAttrPairs] = useState<
+    Array<{ key: string; value: string; mandatory?: boolean; options?: string[] }>
+  >([]);
   const [requiredSkuFields, setRequiredSkuFields] = useState<string[]>([]);
   const [busyMapping, setBusyMapping] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
@@ -147,7 +149,7 @@ export default function ProductForm() {
   const loadSuggestedAttributes = async () => {
     if (!id) return;
     const res = await api.get<{
-      suggestions: Array<{ name: string; label: string; mandatory: boolean }>;
+      suggestions: Array<{ name: string; label: string; mandatory: boolean; options?: string[] }>;
       requiredSkuFields: string[];
     }>(`/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(categoryId)}`);
     setRequiredSkuFields(res.requiredSkuFields);
@@ -161,7 +163,12 @@ export default function ProductForm() {
     const existingKeys = new Set(attrPairs.map((p) => p.key));
     const newPairs = res.suggestions
       .filter((a) => !existingKeys.has(a.name))
-      .map((a) => ({ key: a.name, value: englishMirrorDefaults[a.name] ?? "", mandatory: a.mandatory }));
+      .map((a) => ({
+        key: a.name,
+        value: englishMirrorDefaults[a.name] ?? "",
+        mandatory: a.mandatory,
+        options: a.options,
+      }));
     if (newPairs.length === 0) {
       toast.show("No attribute suggestions available - add manually");
     } else {
@@ -173,18 +180,24 @@ export default function ProductForm() {
     }
   };
 
-  // Guesses at values for a few common enum-style attributes so the dummy
-  // fill has a decent shot at passing Daraz's validation; anything else
-  // falls back to a plain placeholder the user can edit before syncing.
+  // Fallback guesses for the rare mandatory attribute that's free text with
+  // no Daraz-supplied options list; anything with a real options list below
+  // uses one of those instead, since Daraz rejects any other value for it.
   const DUMMY_ATTRIBUTE_VALUES: Record<string, string> = {
-    color_family: "Black",
     warranty_type: "No Warranty",
     recommended_age: "18",
   };
 
   const fillTestData = () => {
     setAttrPairs((prev) =>
-      prev.map((p) => (p.mandatory && !p.value.trim() ? { ...p, value: DUMMY_ATTRIBUTE_VALUES[p.key] ?? "Test" } : p)),
+      prev.map((p) => {
+        if (!p.mandatory || p.value.trim()) return p;
+        if (p.options?.length) {
+          const preferred = p.options.find((o) => o === "Not Specified") ?? p.options[0];
+          return { ...p, value: preferred };
+        }
+        return { ...p, value: DUMMY_ATTRIBUTE_VALUES[p.key] ?? "Test" };
+      }),
     );
     setVariants((prev) =>
       prev.map((v) => {
@@ -304,7 +317,11 @@ export default function ProductForm() {
           </div>
           <div className="field">
             <label>Brand / vendor</label>
-            <input type="text" value={vendor} onChange={(e) => setVendor(e.target.value)} />
+            <input type="text" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="e.g. No Brand" />
+            <span className="subdued small">
+              Daraz validates this against its own registered brand list - use the exact brand name as
+              listed on Daraz, or "No Brand" for unbranded/generic items.
+            </span>
           </div>
           <div className="field">
             <label>Image URLs (one per line)</label>
@@ -452,14 +469,30 @@ export default function ProductForm() {
                     onChange={(e) => updateAttrRow(i, "key", e.target.value)}
                     style={{ maxWidth: 220 }}
                   />
-                  <input
-                    type="text"
-                    placeholder="Value"
-                    value={p.value}
-                    onChange={(e) => updateAttrRow(i, "value", e.target.value)}
-                    style={{ maxWidth: 260 }}
-                    className={p.mandatory && !p.value.trim() ? "field-missing" : ""}
-                  />
+                  {p.options?.length ? (
+                    <select
+                      value={p.value}
+                      onChange={(e) => updateAttrRow(i, "value", e.target.value)}
+                      style={{ maxWidth: 260 }}
+                      className={p.mandatory && !p.value.trim() ? "field-missing" : ""}
+                    >
+                      <option value="">Select...</option>
+                      {p.options.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="Value"
+                      value={p.value}
+                      onChange={(e) => updateAttrRow(i, "value", e.target.value)}
+                      style={{ maxWidth: 260 }}
+                      className={p.mandatory && !p.value.trim() ? "field-missing" : ""}
+                    />
+                  )}
                   {p.mandatory && <span className="required-mark">*required</span>}
                   <button className="plain critical" onClick={() => removeAttrRow(i)}>
                     Remove

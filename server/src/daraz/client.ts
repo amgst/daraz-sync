@@ -55,7 +55,12 @@ export class DarazApiError extends Error {
   get fullMessage(): string {
     if (!Array.isArray(this.detail) || this.detail.length === 0) return this.message;
     const parts = this.detail
-      .map((d) => (d && typeof d === "object" ? (d as { message?: unknown }).message : undefined))
+      .map((d) => {
+        if (!d || typeof d !== "object") return undefined;
+        const { field, message } = d as { field?: unknown; message?: unknown };
+        if (typeof message !== "string") return undefined;
+        return typeof field === "string" && field ? `[${field}] ${message}` : message;
+      })
       .filter((m): m is string => typeof m === "string");
     return parts.length ? `${this.message} - ${parts.join("; ")}` : this.message;
   }
@@ -547,6 +552,13 @@ export interface DarazCategoryAttribute {
   name: string;
   label: string;
   mandatory: boolean;
+  // Present for dropdown-style fields (input_type "singleSelect" /
+  // "multiEnumInput" / etc.) that Daraz will reject any other value for -
+  // confirmed live: a category's "color_family" came back with a real
+  // options list (Maroon/Red/Black/...), while "brand" was singleSelect
+  // with no options here at all (its values come from a separate brand
+  // lookup this app doesn't implement, so it stays free text).
+  options?: string[];
 }
 
 // Field names for the mandatory flag (and the array's location in the
@@ -560,7 +572,18 @@ function normalizeCategoryAttribute(raw: unknown): DarazCategoryAttribute | null
   if (typeof name !== "string") return null;
   const label = obj.label ?? obj.display_name ?? name;
   const mandatory = Boolean(obj.is_mandatory ?? obj.mandatory ?? obj.required ?? false);
-  return { name, label: typeof label === "string" ? label : name, mandatory };
+  const rawOptions = obj.options;
+  const options = Array.isArray(rawOptions)
+    ? rawOptions
+        .map((o) => (o && typeof o === "object" ? (o as { name?: unknown }).name : o))
+        .filter((n): n is string => typeof n === "string")
+    : undefined;
+  return {
+    name,
+    label: typeof label === "string" ? label : name,
+    mandatory,
+    ...(options && options.length ? { options } : {}),
+  };
 }
 
 export async function getCategoryAttributes(
