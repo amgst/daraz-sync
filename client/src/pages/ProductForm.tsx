@@ -10,6 +10,9 @@ interface VariantRow {
   compareAtPrice: string;
   quantity: string;
   packageWeightKg: string;
+  packageLengthCm: string;
+  packageWidthCm: string;
+  packageHeightCm: string;
 }
 
 const emptyVariant = (): VariantRow => ({
@@ -18,7 +21,20 @@ const emptyVariant = (): VariantRow => ({
   compareAtPrice: "",
   quantity: "0",
   packageWeightKg: "",
+  packageLengthCm: "",
+  packageWidthCm: "",
+  packageHeightCm: "",
 });
+
+// Daraz's per-SKU package dimension fields - keyed by the raw attribute name
+// the category schema (and sync payload) uses, so the "required" flags this
+// app fetches from Daraz can drive the UI without a separate mapping table.
+const DIMENSION_COLUMNS: Array<{ field: string; key: keyof VariantRow; label: string }> = [
+  { field: "package_weight", key: "packageWeightKg", label: "Weight (kg)" },
+  { field: "package_length", key: "packageLengthCm", label: "Length (cm)" },
+  { field: "package_width", key: "packageWidthCm", label: "Width (cm)" },
+  { field: "package_height", key: "packageHeightCm", label: "Height (cm)" },
+];
 
 export default function ProductForm() {
   const { id } = useParams();
@@ -37,7 +53,7 @@ export default function ProductForm() {
   const [product, setProduct] = useState<Product | null>(null);
   const [categoryId, setCategoryId] = useState("");
   const [attrPairs, setAttrPairs] = useState<Array<{ key: string; value: string; mandatory?: boolean }>>([]);
-  const [weightMandatory, setWeightMandatory] = useState(false);
+  const [requiredSkuFields, setRequiredSkuFields] = useState<string[]>([]);
   const [busyMapping, setBusyMapping] = useState(false);
 
   const [linkQuery, setLinkQuery] = useState("");
@@ -62,6 +78,9 @@ export default function ProductForm() {
               compareAtPrice: v.compareAtPrice ?? "",
               quantity: String(v.quantity),
               packageWeightKg: v.packageWeightKg != null ? String(v.packageWeightKg) : "",
+              packageLengthCm: v.packageLengthCm != null ? String(v.packageLengthCm) : "",
+              packageWidthCm: v.packageWidthCm != null ? String(v.packageWidthCm) : "",
+              packageHeightCm: v.packageHeightCm != null ? String(v.packageHeightCm) : "",
             }))
           : [emptyVariant()],
       );
@@ -91,6 +110,9 @@ export default function ProductForm() {
         compareAtPrice: v.compareAtPrice.trim() || undefined,
         quantity: Number(v.quantity) || 0,
         packageWeightKg: v.packageWeightKg.trim() ? Number(v.packageWeightKg) : undefined,
+        packageLengthCm: v.packageLengthCm.trim() ? Number(v.packageLengthCm) : undefined,
+        packageWidthCm: v.packageWidthCm.trim() ? Number(v.packageWidthCm) : undefined,
+        packageHeightCm: v.packageHeightCm.trim() ? Number(v.packageHeightCm) : undefined,
       })),
   });
 
@@ -122,9 +144,9 @@ export default function ProductForm() {
     if (!id) return;
     const res = await api.get<{
       suggestions: Array<{ name: string; label: string; mandatory: boolean }>;
-      weightMandatory: boolean;
+      requiredSkuFields: string[];
     }>(`/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(categoryId)}`);
-    setWeightMandatory(res.weightMandatory);
+    setRequiredSkuFields(res.requiredSkuFields);
     const existingKeys = new Set(attrPairs.map((p) => p.key));
     const newPairs = res.suggestions
       .filter((a) => !existingKeys.has(a.name))
@@ -142,16 +164,19 @@ export default function ProductForm() {
 
   const missingMandatoryFields = () => {
     const missingAttrs = attrPairs.filter((p) => p.mandatory && p.key.trim() && !p.value.trim()).map((p) => p.key);
-    const missingWeight = weightMandatory && variants.some((v) => v.sku.trim() && !v.packageWeightKg.trim());
-    return { missingAttrs, missingWeight };
+    const missingDimensions = DIMENSION_COLUMNS.filter(
+      (col) =>
+        requiredSkuFields.includes(col.field) && variants.some((v) => v.sku.trim() && !v[col.key].trim()),
+    ).map((col) => col.label);
+    return { missingAttrs, missingDimensions };
   };
 
   const saveMapping = async (andSync: boolean) => {
     if (!id) return;
     if (andSync) {
-      const { missingAttrs, missingWeight } = missingMandatoryFields();
-      if (missingAttrs.length > 0 || missingWeight) {
-        const parts = [...missingAttrs, ...(missingWeight ? ["Weight (kg)"] : [])];
+      const { missingAttrs, missingDimensions } = missingMandatoryFields();
+      if (missingAttrs.length > 0 || missingDimensions.length > 0) {
+        const parts = [...missingAttrs, ...missingDimensions];
         toast.show(`Daraz requires a value for: ${parts.join(", ")}`, { isError: true });
         return;
       }
@@ -254,7 +279,12 @@ export default function ProductForm() {
                   <th>Price</th>
                   <th>Compare-at</th>
                   <th>Quantity</th>
-                  <th>Weight (kg){weightMandatory && <span className="required-mark"> *required</span>}</th>
+                  {DIMENSION_COLUMNS.map((col) => (
+                    <th key={col.field}>
+                      {col.label}
+                      {requiredSkuFields.includes(col.field) && <span className="required-mark"> *required</span>}
+                    </th>
+                  ))}
                   <th></th>
                 </tr>
               </thead>
@@ -281,15 +311,21 @@ export default function ProductForm() {
                         onChange={(e) => updateVariant(i, "quantity", e.target.value)}
                       />
                     </td>
-                    <td>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={v.packageWeightKg}
-                        onChange={(e) => updateVariant(i, "packageWeightKg", e.target.value)}
-                        className={weightMandatory && v.sku.trim() && !v.packageWeightKg.trim() ? "field-missing" : ""}
-                      />
-                    </td>
+                    {DIMENSION_COLUMNS.map((col) => (
+                      <td key={col.field}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={v[col.key]}
+                          onChange={(e) => updateVariant(i, col.key, e.target.value)}
+                          className={
+                            requiredSkuFields.includes(col.field) && v.sku.trim() && !v[col.key].trim()
+                              ? "field-missing"
+                              : ""
+                          }
+                        />
+                      </td>
+                    ))}
                     <td>
                       <button className="plain critical" onClick={() => removeVariant(i)}>
                         Remove

@@ -4,7 +4,12 @@ import { Timestamp } from "firebase-admin/firestore";
 import { requireAuth } from "../authMiddleware.js";
 import { syncProduct, importDarazProduct, importAllDarazProducts, pullPriceStockFromDaraz } from "../daraz/sync.js";
 import { getValidAccessToken } from "../daraz/tokens.js";
-import { getCategoryAttributes, getProducts as searchDarazProducts, RESERVED_ATTRIBUTE_KEYS } from "../daraz/client.js";
+import {
+  getCategoryAttributes,
+  getProducts as searchDarazProducts,
+  RESERVED_ATTRIBUTE_KEYS,
+  SKU_DIMENSION_FIELDS,
+} from "../daraz/client.js";
 import { productsCol, serializeProduct, type ProductDoc, type VariantDoc } from "../daraz/models.js";
 
 const router = Router();
@@ -27,6 +32,9 @@ router.post("/", async (req, res) => {
       quantity: number;
       compareAtPrice?: string;
       packageWeightKg?: number;
+      packageLengthCm?: number;
+      packageWidthCm?: number;
+      packageHeightCm?: number;
     }>;
   };
 
@@ -58,6 +66,9 @@ router.post("/", async (req, res) => {
       compareAtPrice: v.compareAtPrice ?? null,
       quantity: v.quantity ?? 0,
       packageWeightKg: v.packageWeightKg ?? null,
+      packageLengthCm: v.packageLengthCm ?? null,
+      packageWidthCm: v.packageWidthCm ?? null,
+      packageHeightCm: v.packageHeightCm ?? null,
     })),
   };
 
@@ -88,6 +99,9 @@ router.put("/:id", async (req, res) => {
       quantity: number;
       compareAtPrice?: string;
       packageWeightKg?: number;
+      packageLengthCm?: number;
+      packageWidthCm?: number;
+      packageHeightCm?: number;
     }>;
   };
 
@@ -115,6 +129,9 @@ router.put("/:id", async (req, res) => {
         compareAtPrice: v.compareAtPrice ?? null,
         quantity: v.quantity ?? 0,
         packageWeightKg: v.packageWeightKg ?? null,
+        packageLengthCm: v.packageLengthCm ?? null,
+        packageWidthCm: v.packageWidthCm ?? null,
+        packageHeightCm: v.packageHeightCm ?? null,
       }),
     );
   }
@@ -188,13 +205,13 @@ router.post("/:id/sync", async (req, res) => {
 router.get("/:id/suggested-attributes", async (req, res) => {
   const categoryId = String(req.query.categoryId ?? "");
   if (!categoryId) {
-    res.json({ suggestions: [], weightMandatory: false });
+    res.json({ suggestions: [], requiredSkuFields: [] });
     return;
   }
   try {
     const session = await getValidAccessToken();
     if (!session) {
-      res.json({ suggestions: [], weightMandatory: false });
+      res.json({ suggestions: [], requiredSkuFields: [] });
       return;
     }
     const categoryAttributes = await getCategoryAttributes(
@@ -202,16 +219,18 @@ router.get("/:id/suggested-attributes", async (req, res) => {
       categoryId,
     );
     // Daraz's category attribute schema lists basic fields (name/description/
-    // brand/package_weight) alongside real custom attributes, but this app
-    // already sends those via their own dedicated inputs - suggesting them
-    // here just invites a duplicate, blank override (see buildProductPayload).
+    // brand/package dimensions) alongside real custom attributes, but this
+    // app already sends those via their own dedicated inputs - suggesting
+    // them here just invites a duplicate, blank override (see buildProductPayload).
     const suggestions = categoryAttributes
       .filter((a) => !RESERVED_ATTRIBUTE_KEYS.has(a.name))
       .map((a) => ({ name: a.name, label: a.label, mandatory: a.mandatory }));
-    const weightMandatory = categoryAttributes.some((a) => a.name === "package_weight" && a.mandatory);
-    res.json({ suggestions, weightMandatory });
+    const requiredSkuFields = categoryAttributes
+      .filter((a) => SKU_DIMENSION_FIELDS.includes(a.name) && a.mandatory)
+      .map((a) => a.name);
+    res.json({ suggestions, requiredSkuFields });
   } catch {
-    res.json({ suggestions: [], weightMandatory: false });
+    res.json({ suggestions: [], requiredSkuFields: [] });
   }
 });
 

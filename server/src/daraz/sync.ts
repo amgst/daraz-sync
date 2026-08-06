@@ -9,6 +9,7 @@ import {
   getProductDetail,
   getProducts,
   effectivePrice,
+  DarazApiError,
   type CreateProductInput,
   type DarazSkuDetail,
 } from "./client.js";
@@ -22,7 +23,7 @@ async function uploadProductImages(
   for (const url of imageUrls) {
     const response = await fetch(url);
     const buffer = Buffer.from(await response.arrayBuffer());
-    const darazUrl = await uploadImage(darazOpts, buffer.toString("base64"));
+    const darazUrl = await uploadImage(darazOpts, buffer);
     uploaded.push(darazUrl);
   }
   return uploaded;
@@ -98,6 +99,7 @@ export async function syncProduct(
       description: product.descriptionHtml || product.title,
       brandName: product.vendor || undefined,
       attributes: JSON.parse(product.attributesJson) as Record<string, string>,
+      images: darazImageUrls,
       skus: product.variants.map((variant) => ({
         SellerSku: variant.sku,
         price: variant.price,
@@ -105,6 +107,9 @@ export async function syncProduct(
         Images: darazImageUrls,
         ...(skuIds.has(variant.sku) ? { SkuId: skuIds.get(variant.sku) } : {}),
         ...(variant.packageWeightKg != null ? { package_weight: String(variant.packageWeightKg) } : {}),
+        ...(variant.packageLengthCm != null ? { package_length: String(variant.packageLengthCm) } : {}),
+        ...(variant.packageWidthCm != null ? { package_width: String(variant.packageWidthCm) } : {}),
+        ...(variant.packageHeightCm != null ? { package_height: String(variant.packageHeightCm) } : {}),
       })),
     };
 
@@ -124,9 +129,10 @@ export async function syncProduct(
       });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message =
+      error instanceof DarazApiError ? error.fullMessage : error instanceof Error ? error.message : String(error);
     await docRef.update({ syncStatus: "error", lastError: message, updatedAt: Timestamp.now() });
-    throw error;
+    throw new Error(message);
   }
 }
 
@@ -179,6 +185,9 @@ export async function importDarazProduct(darazItemId: string): Promise<ImportRes
         compareAtPrice: compareAtPrice ?? null,
         quantity: Number(sku.quantity ?? 0),
         packageWeightKg: sku.packageWeightKg ?? null,
+        packageLengthCm: sku.packageLengthCm ?? null,
+        packageWidthCm: sku.packageWidthCm ?? null,
+        packageHeightCm: sku.packageHeightCm ?? null,
       };
     }),
   };

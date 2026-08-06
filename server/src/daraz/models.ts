@@ -31,6 +31,9 @@ export interface VariantDoc {
   compareAtPrice: string | null;
   quantity: number;
   packageWeightKg: number | null;
+  packageLengthCm: number | null;
+  packageWidthCm: number | null;
+  packageHeightCm: number | null;
 }
 
 export interface ProductDoc {

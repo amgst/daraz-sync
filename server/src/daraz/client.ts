@@ -40,10 +40,24 @@ interface RequestOptions {
 
 export class DarazApiError extends Error {
   code?: string;
-  constructor(message: string, code?: string) {
+  detail?: unknown;
+  constructor(message: string, code?: string, detail?: unknown) {
     super(message);
     this.name = "DarazApiError";
     this.code = code;
+    this.detail = detail;
+  }
+
+  // The top-level `message` (e.g. "E500: Create product failed") is a
+  // generic wrapper - the field-level cause lives in `detail`, if Daraz sent
+  // one. Fold it in so callers that only look at `.message` (route error
+  // responses, Firestore's lastError) still see the real reason.
+  get fullMessage(): string {
+    if (!Array.isArray(this.detail) || this.detail.length === 0) return this.message;
+    const parts = this.detail
+      .map((d) => (d && typeof d === "object" ? (d as { message?: unknown }).message : undefined))
+      .filter((m): m is string => typeof m === "string");
+    return parts.length ? `${this.message} - ${parts.join("; ")}` : this.message;
   }
 }
 
@@ -84,16 +98,18 @@ async function request<T = unknown>({
     code?: string;
     type?: string;
     message?: string;
+    detail?: unknown;
     data?: unknown;
   } & Record<string, unknown>;
 
   // IOP-style APIs return HTTP 200 with an error `code` in the body on failure.
   // The top-level message is often a generic wrapper (e.g. "Update product
-  // failed") - log the full response so the real cause (missing attribute,
-  // bad image, etc.) shows up in server logs instead of only that summary.
+  // failed") - still log the full response for server-side debugging, but
+  // also carry `detail` (the field-level cause) on the thrown error itself
+  // so callers don't depend on having access to server logs to see it.
   if (json.code && json.code !== "0") {
     console.error(`[daraz-sync] Daraz API error on ${apiPath}:`, JSON.stringify(json));
-    throw new DarazApiError(json.message ?? "Daraz API error", json.code);
+    throw new DarazApiError(json.message ?? "Daraz API error", json.code, json.detail);
   }
 
   return json as T;
@@ -167,6 +183,7 @@ export interface CreateProductInput {
   description: string;
   brandName?: string;
   attributes: Record<string, string>;
+  images: string[];
   skus: DarazSku[];
 }
 
@@ -175,17 +192,47 @@ interface DarazProductClientOptions {
   country: string;
 }
 
+// Unlike every other call in this client, image upload takes the file itself
+// as multipart/form-data rather than a signed urlencoded business param -
+// confirmed against a live call after the urlencoded-base64 approach failed
+// with "mandatory parameter image not supplied". The signature only covers
+// the system params (app_key/timestamp/sign_method/access_token); the file
+// bytes aren't part of it.
 export async function uploadImage(
   { accessToken, country }: DarazProductClientOptions,
-  imageBase64: string,
+  imageBuffer: Buffer,
 ): Promise<string> {
-  const result = await request<{ data: { image: { url: string } } }>({
-    apiPath: "/image/upload",
-    params: { image: imageBase64 },
-    accessToken,
-    apiHost: apiHostFor(country),
-  });
-  return result.data.image.url;
+  const { appKey, appSecret } = getDarazAppCredentials();
+  const apiPath = "/image/upload";
+  const systemParams: Record<string, string> = {
+    app_key: appKey,
+    timestamp: String(Date.now()),
+    sign_method: "sha256",
+    access_token: accessToken,
+  };
+  systemParams.sign = sign(apiPath, systemParams, appSecret);
+
+  const url = new URL(apiHostFor(country) + apiPath);
+  for (const [key, value] of Object.entries(systemParams)) url.searchParams.set(key, value);
+
+  const form = new FormData();
+  form.append("image", new Blob([imageBuffer]), "image.jpg");
+
+  const response = await fetch(url.toString(), { method: "POST", body: form });
+  const json = (await response.json()) as {
+    code?: string;
+    message?: string;
+    detail?: unknown;
+    data?: { image?: { url?: string } };
+  };
+  if (json.code && json.code !== "0") {
+    console.error(`[daraz-sync] Daraz API error on ${apiPath}:`, JSON.stringify(json));
+    throw new DarazApiError(json.message ?? "Daraz API error", json.code, json.detail);
+  }
+  if (!json.data?.image?.url) {
+    throw new DarazApiError("Daraz image upload returned no URL");
+  }
+  return json.data.image.url;
 }
 
 export async function createProduct(
@@ -306,6 +353,9 @@ export interface DarazSkuDetail {
   specialFromDate: string | null;
   specialToDate: string | null;
   packageWeightKg: number | null;
+  packageLengthCm: number | null;
+  packageWidthCm: number | null;
+  packageHeightCm: number | null;
 }
 
 export interface DarazVariationDef {
@@ -357,6 +407,9 @@ export async function getProductDetail(
         special_from_date?: string;
         special_to_date?: string;
         package_weight?: unknown;
+        package_length?: unknown;
+        package_width?: unknown;
+        package_height?: unknown;
       }>;
     };
   }>({
@@ -374,23 +427,29 @@ export async function getProductDetail(
     label: v.label,
   }));
 
-  const skus: DarazSkuDetail[] = data.skus.map((sku) => {
-    const packageWeightKg = sku.package_weight !== undefined ? Number(sku.package_weight) : null;
-    return {
-      SkuId: String(sku.SkuId),
-      SellerSku: String(sku.SellerSku),
-      price: String(sku.price),
-      quantity: String(sku.quantity),
-      images: sku.Images ?? [],
-      saleProp: Object.fromEntries(
-        Object.entries(sku.saleProp ?? {}).map(([k, v]) => [k, String(v)]),
-      ),
-      specialPrice: sku.special_price !== undefined ? String(sku.special_price) : null,
-      specialFromDate: sku.special_from_date ?? null,
-      specialToDate: sku.special_to_date ?? null,
-      packageWeightKg: Number.isFinite(packageWeightKg) ? packageWeightKg : null,
-    };
-  });
+  const toFiniteOrNull = (value: unknown): number | null => {
+    if (value === undefined) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const skus: DarazSkuDetail[] = data.skus.map((sku) => ({
+    SkuId: String(sku.SkuId),
+    SellerSku: String(sku.SellerSku),
+    price: String(sku.price),
+    quantity: String(sku.quantity),
+    images: sku.Images ?? [],
+    saleProp: Object.fromEntries(
+      Object.entries(sku.saleProp ?? {}).map(([k, v]) => [k, String(v)]),
+    ),
+    specialPrice: sku.special_price !== undefined ? String(sku.special_price) : null,
+    specialFromDate: sku.special_from_date ?? null,
+    specialToDate: sku.special_to_date ?? null,
+    packageWeightKg: toFiniteOrNull(sku.package_weight),
+    packageLengthCm: toFiniteOrNull(sku.package_length),
+    packageWidthCm: toFiniteOrNull(sku.package_width),
+    packageHeightCm: toFiniteOrNull(sku.package_height),
+  }));
 
   const images =
     data.images ?? skus.flatMap((sku) => sku.images).filter((v, i, a) => a.indexOf(v) === i);
@@ -651,14 +710,18 @@ function escapeXml(value: string): string {
 // custom attributes), dropping them here prevents a duplicate tag where
 // Daraz keeps the first - blank - occurrence and rejects the whole product
 // as missing that field.
-export const RESERVED_ATTRIBUTE_KEYS = new Set([
-  "name",
-  "title",
-  "description",
-  "short_description",
-  "brand",
-  "package_weight",
-]);
+//
+// NOTE: "short_description" is deliberately NOT in this set - confirmed
+// against a live category schema that it's a distinct field from
+// "description" (Daraz's "Highlights" vs "Product Description"), often
+// mandatory on its own, and this app has no dedicated input for it - it
+// must stay available as a generic attribute the user can fill in.
+// Per-SKU dimension fields (weight/length/width/height) - these live on the
+// app's dedicated variant inputs, not the generic attribute map, since
+// they're Sku-level fields in the payload, not Product-level Attributes.
+export const SKU_DIMENSION_FIELDS = ["package_weight", "package_length", "package_width", "package_height"];
+
+export const RESERVED_ATTRIBUTE_KEYS = new Set(["name", "title", "description", "brand", ...SKU_DIMENSION_FIELDS]);
 
 // The product create/update APIs take a single XML `payload` business
 // parameter (not individual form fields) - this mirrors the IOP product API
@@ -684,5 +747,13 @@ function buildProductPayload(input: CreateProductInput, itemId?: string): string
     })
     .join("");
 
-  return `<Request><Product>${itemId ? `<ItemId>${itemId}</ItemId>` : ""}<PrimaryCategory>${input.primaryCategoryId}</PrimaryCategory><Attributes>${attributesXml}<name>${escapeXml(input.name)}</name><description>${escapeXml(input.description)}</description>${input.brandName ? `<brand>${escapeXml(input.brandName)}</brand>` : ""}</Attributes><Skus>${skusXml}</Skus></Product></Request>`;
+  // Daraz rejects a product with no top-level Images ("Main image is
+  // require") even when every Sku already carries its own Images list - the
+  // product-level gallery is a separate required field, not implied by the
+  // per-Sku ones.
+  const productImagesXml = input.images.length
+    ? `<Images>${input.images.map((url) => `<Image>${escapeXml(url)}</Image>`).join("")}</Images>`
+    : "";
+
+  return `<Request><Product>${itemId ? `<ItemId>${itemId}</ItemId>` : ""}<PrimaryCategory>${input.primaryCategoryId}</PrimaryCategory><Attributes>${attributesXml}<name>${escapeXml(input.name)}</name><description>${escapeXml(input.description)}</description>${input.brandName ? `<brand>${escapeXml(input.brandName)}</brand>` : ""}</Attributes>${productImagesXml}<Skus>${skusXml}</Skus></Product></Request>`;
 }
