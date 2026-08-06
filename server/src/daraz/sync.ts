@@ -70,56 +70,62 @@ export async function syncProduct(
     return new Map(detail.skus.map((s) => [s.SellerSku, s.SkuId]));
   }
 
-  // Fast path: only price/quantity changed and the product already exists on Daraz.
-  if (type === "price_qty" && product.darazItemId) {
+  try {
+    // Fast path: only price/quantity changed and the product already exists on Daraz.
+    if (type === "price_qty" && product.darazItemId) {
+      const skuIds = await skuIdsBySellerSku();
+      await updatePriceQuantity(
+        darazOpts,
+        product.darazItemId,
+        product.variants.map((variant) => ({
+          SellerSku: variant.sku,
+          price: variant.price,
+          quantity: String(variant.quantity),
+          SkuId: skuIds.get(variant.sku),
+        })),
+      );
+      await docRef.update({ syncStatus: "synced", lastSyncedAt: Timestamp.now(), lastError: null, updatedAt: Timestamp.now() });
+      return;
+    }
+
+    const imageUrls = JSON.parse(product.imagesJson) as string[];
+    const darazImageUrls = await uploadProductImages(darazOpts, imageUrls);
     const skuIds = await skuIdsBySellerSku();
-    await updatePriceQuantity(
-      darazOpts,
-      product.darazItemId,
-      product.variants.map((variant) => ({
+
+    const input: CreateProductInput = {
+      primaryCategoryId: product.darazCategoryId,
+      name: product.title,
+      description: product.descriptionHtml || product.title,
+      brandName: product.vendor || undefined,
+      attributes: JSON.parse(product.attributesJson) as Record<string, string>,
+      skus: product.variants.map((variant) => ({
         SellerSku: variant.sku,
         price: variant.price,
         quantity: String(variant.quantity),
-        SkuId: skuIds.get(variant.sku),
+        Images: darazImageUrls,
+        ...(skuIds.has(variant.sku) ? { SkuId: skuIds.get(variant.sku) } : {}),
       })),
-    );
-    await docRef.update({ syncStatus: "synced", lastSyncedAt: Timestamp.now(), lastError: null, updatedAt: Timestamp.now() });
-    return;
-  }
+    };
 
-  const imageUrls = JSON.parse(product.imagesJson) as string[];
-  const darazImageUrls = await uploadProductImages(darazOpts, imageUrls);
-  const skuIds = await skuIdsBySellerSku();
-
-  const input: CreateProductInput = {
-    primaryCategoryId: product.darazCategoryId,
-    name: product.title,
-    description: product.descriptionHtml || product.title,
-    brandName: product.vendor || undefined,
-    attributes: JSON.parse(product.attributesJson) as Record<string, string>,
-    skus: product.variants.map((variant) => ({
-      SellerSku: variant.sku,
-      price: variant.price,
-      quantity: String(variant.quantity),
-      Images: darazImageUrls,
-      ...(skuIds.has(variant.sku) ? { SkuId: skuIds.get(variant.sku) } : {}),
-    })),
-  };
-
-  if (product.darazItemId) {
-    await updateProduct(darazOpts, product.darazItemId, input);
-    await docRef.update({ syncStatus: "synced", lastSyncedAt: Timestamp.now(), lastError: null, updatedAt: Timestamp.now() });
-  } else {
-    const created = await createProduct(darazOpts, input);
-    const firstSku = created.sku_list[0];
-    await docRef.update({
-      darazItemId: created.item_id,
-      darazSkuId: firstSku?.SkuId ?? null,
-      syncStatus: "synced",
-      lastSyncedAt: Timestamp.now(),
-      lastError: null,
-      updatedAt: Timestamp.now(),
-    });
+    if (product.darazItemId) {
+      await updateProduct(darazOpts, product.darazItemId, input);
+      await docRef.update({ syncStatus: "synced", lastSyncedAt: Timestamp.now(), lastError: null, updatedAt: Timestamp.now() });
+    } else {
+      const created = await createProduct(darazOpts, input);
+      const firstSku = created.sku_list[0];
+      await docRef.update({
+        darazItemId: created.item_id,
+        darazSkuId: firstSku?.SkuId ?? null,
+        syncStatus: "synced",
+        lastSyncedAt: Timestamp.now(),
+        lastError: null,
+        updatedAt: Timestamp.now(),
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await docRef.update({ syncStatus: "error", lastError: message, updatedAt: Timestamp.now() });
+    throw error;
   }
 }
 

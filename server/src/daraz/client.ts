@@ -618,11 +618,20 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
+// Basic fields that this payload always sends explicitly (below) - if the
+// caller's attribute map also contains one of these (e.g. picked up from
+// Daraz's own category attribute schema, which lists them alongside real
+// custom attributes), dropping them here prevents a duplicate tag where
+// Daraz keeps the first - blank - occurrence and rejects the whole product
+// as missing that field.
+export const RESERVED_ATTRIBUTE_KEYS = new Set(["name", "title", "description", "short_description", "brand"]);
+
 // The product create/update APIs take a single XML `payload` business
 // parameter (not individual form fields) - this mirrors the IOP product API
 // shape; verify the exact tag set against the live docs before shipping.
 function buildProductPayload(input: CreateProductInput, itemId?: string): string {
   const attributesXml = Object.entries(input.attributes)
+    .filter(([key]) => !RESERVED_ATTRIBUTE_KEYS.has(key))
     .map(([key, value]) => `<${key}>${escapeXml(value)}</${key}>`)
     .join("");
 

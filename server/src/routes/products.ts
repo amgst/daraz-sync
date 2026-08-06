@@ -4,7 +4,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { requireAuth } from "../authMiddleware.js";
 import { syncProduct, importDarazProduct, importAllDarazProducts, pullPriceStockFromDaraz } from "../daraz/sync.js";
 import { getValidAccessToken } from "../daraz/tokens.js";
-import { getCategoryAttributes, getProducts as searchDarazProducts } from "../daraz/client.js";
+import { getCategoryAttributes, getProducts as searchDarazProducts, RESERVED_ATTRIBUTE_KEYS } from "../daraz/client.js";
 import { productsCol, serializeProduct, type ProductDoc, type VariantDoc } from "../daraz/models.js";
 
 const router = Router();
@@ -188,7 +188,14 @@ router.get("/:id/suggested-attributes", async (req, res) => {
       { accessToken: session.accessToken, country: session.country },
       categoryId,
     )) as { data?: { attributes?: Array<{ name?: string }> } };
-    const names = (result.data?.attributes ?? []).map((a) => a.name).filter((n): n is string => Boolean(n));
+    // Daraz's category attribute schema lists basic fields (name/description/
+    // brand) alongside real custom attributes, but this app already sends
+    // those via their own Title/Description/Brand inputs - suggesting them
+    // here just invites a duplicate, blank override (see buildProductPayload).
+    const names = (result.data?.attributes ?? [])
+      .map((a) => a.name)
+      .filter((n): n is string => Boolean(n))
+      .filter((n) => !RESERVED_ATTRIBUTE_KEYS.has(n));
     res.json({ suggestions: names });
   } catch {
     res.json({ suggestions: [] });
