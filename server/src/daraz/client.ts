@@ -721,7 +721,20 @@ function escapeXml(value: string): string {
 // they're Sku-level fields in the payload, not Product-level Attributes.
 export const SKU_DIMENSION_FIELDS = ["package_weight", "package_length", "package_width", "package_height"];
 
-export const RESERVED_ATTRIBUTE_KEYS = new Set(["name", "title", "description", "brand", ...SKU_DIMENSION_FIELDS]);
+// Daraz's category attribute schema is a flat list mixing Product-level
+// Attributes with Sku-level fields (SellerSku/price/quantity) - the latter
+// are already sent through the Variants table's dedicated columns, so they
+// need reserving too or they hit the same duplicate-tag problem.
+export const RESERVED_ATTRIBUTE_KEYS = new Set([
+  "name",
+  "title",
+  "description",
+  "brand",
+  "SellerSku",
+  "price",
+  "quantity",
+  ...SKU_DIMENSION_FIELDS,
+]);
 
 // The product create/update APIs take a single XML `payload` business
 // parameter (not individual form fields) - this mirrors the IOP product API

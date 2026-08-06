@@ -173,6 +173,34 @@ export default function ProductForm() {
     }
   };
 
+  // Guesses at values for a few common enum-style attributes so the dummy
+  // fill has a decent shot at passing Daraz's validation; anything else
+  // falls back to a plain placeholder the user can edit before syncing.
+  const DUMMY_ATTRIBUTE_VALUES: Record<string, string> = {
+    color_family: "Black",
+    warranty_type: "No Warranty",
+    recommended_age: "18",
+  };
+
+  const fillTestData = () => {
+    setAttrPairs((prev) =>
+      prev.map((p) => (p.mandatory && !p.value.trim() ? { ...p, value: DUMMY_ATTRIBUTE_VALUES[p.key] ?? "Test" } : p)),
+    );
+    setVariants((prev) =>
+      prev.map((v) => {
+        if (!v.sku.trim()) return v;
+        const next = { ...v };
+        for (const col of DIMENSION_COLUMNS) {
+          if (requiredSkuFields.includes(col.field) && !next[col.key].trim()) {
+            next[col.key] = col.field === "package_weight" ? "0.5" : "10";
+          }
+        }
+        return next;
+      }),
+    );
+    toast.show("Filled blank required fields with test data - review before syncing");
+  };
+
   const missingMandatoryFields = () => {
     const missingAttrs = attrPairs.filter((p) => p.mandatory && p.key.trim() && !p.value.trim()).map((p) => p.key);
     const missingDimensions = DIMENSION_COLUMNS.filter(
@@ -405,6 +433,9 @@ export default function ProductForm() {
             <div className="row" style={{ marginTop: 10 }}>
               <button onClick={loadSuggestedAttributes} disabled={!categoryId}>
                 Load suggested attributes
+              </button>
+              <button onClick={fillTestData} disabled={!categoryId}>
+                Fill required fields with test data
               </button>
             </div>
 
