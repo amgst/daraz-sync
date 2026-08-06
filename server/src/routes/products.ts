@@ -188,30 +188,30 @@ router.post("/:id/sync", async (req, res) => {
 router.get("/:id/suggested-attributes", async (req, res) => {
   const categoryId = String(req.query.categoryId ?? "");
   if (!categoryId) {
-    res.json({ suggestions: [] });
+    res.json({ suggestions: [], weightMandatory: false });
     return;
   }
   try {
     const session = await getValidAccessToken();
     if (!session) {
-      res.json({ suggestions: [] });
+      res.json({ suggestions: [], weightMandatory: false });
       return;
     }
-    const result = (await getCategoryAttributes(
+    const categoryAttributes = await getCategoryAttributes(
       { accessToken: session.accessToken, country: session.country },
       categoryId,
-    )) as { data?: { attributes?: Array<{ name?: string }> } };
+    );
     // Daraz's category attribute schema lists basic fields (name/description/
-    // brand) alongside real custom attributes, but this app already sends
-    // those via their own Title/Description/Brand inputs - suggesting them
+    // brand/package_weight) alongside real custom attributes, but this app
+    // already sends those via their own dedicated inputs - suggesting them
     // here just invites a duplicate, blank override (see buildProductPayload).
-    const names = (result.data?.attributes ?? [])
-      .map((a) => a.name)
-      .filter((n): n is string => Boolean(n))
-      .filter((n) => !RESERVED_ATTRIBUTE_KEYS.has(n));
-    res.json({ suggestions: names });
+    const suggestions = categoryAttributes
+      .filter((a) => !RESERVED_ATTRIBUTE_KEYS.has(a.name))
+      .map((a) => ({ name: a.name, label: a.label, mandatory: a.mandatory }));
+    const weightMandatory = categoryAttributes.some((a) => a.name === "package_weight" && a.mandatory);
+    res.json({ suggestions, weightMandatory });
   } catch {
-    res.json({ suggestions: [] });
+    res.json({ suggestions: [], weightMandatory: false });
   }
 });
 

@@ -484,17 +484,44 @@ export async function getCategoryTree(
   return raw.map(normalizeCategoryNode).filter((n): n is DarazCategoryNode => n !== null);
 }
 
+export interface DarazCategoryAttribute {
+  name: string;
+  label: string;
+  mandatory: boolean;
+}
+
+// Field names for the mandatory flag (and the array's location in the
+// response envelope) aren't confirmed against live docs - same caveat as
+// the category tree normalizer above - so this tries the common IOP/Lazada
+// variants rather than assuming one exact shape.
+function normalizeCategoryAttribute(raw: unknown): DarazCategoryAttribute | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const name = obj.name ?? obj.attribute_name;
+  if (typeof name !== "string") return null;
+  const label = obj.label ?? obj.display_name ?? name;
+  const mandatory = Boolean(obj.is_mandatory ?? obj.mandatory ?? obj.required ?? false);
+  return { name, label: typeof label === "string" ? label : name, mandatory };
+}
+
 export async function getCategoryAttributes(
   { accessToken, country }: DarazProductClientOptions,
   categoryId: string,
-): Promise<unknown> {
-  return request({
+): Promise<DarazCategoryAttribute[]> {
+  const result = await request<{ data?: unknown }>({
     apiPath: "/category/attributes/get",
     params: { primary_category_id: categoryId, language_code: "en" },
     accessToken,
     apiHost: apiHostFor(country),
     method: "GET",
   });
+  const data = result.data;
+  const raw = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { attributes?: unknown[] })?.attributes)
+      ? (data as { attributes: unknown[] }).attributes
+      : [];
+  return raw.map(normalizeCategoryAttribute).filter((a): a is DarazCategoryAttribute => a !== null);
 }
 
 // ---- Orders ----
@@ -624,7 +651,14 @@ function escapeXml(value: string): string {
 // custom attributes), dropping them here prevents a duplicate tag where
 // Daraz keeps the first - blank - occurrence and rejects the whole product
 // as missing that field.
-export const RESERVED_ATTRIBUTE_KEYS = new Set(["name", "title", "description", "short_description", "brand"]);
+export const RESERVED_ATTRIBUTE_KEYS = new Set([
+  "name",
+  "title",
+  "description",
+  "short_description",
+  "brand",
+  "package_weight",
+]);
 
 // The product create/update APIs take a single XML `payload` business
 // parameter (not individual form fields) - this mirrors the IOP product API

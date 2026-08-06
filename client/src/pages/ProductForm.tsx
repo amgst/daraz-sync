@@ -36,7 +36,8 @@ export default function ProductForm() {
 
   const [product, setProduct] = useState<Product | null>(null);
   const [categoryId, setCategoryId] = useState("");
-  const [attrPairs, setAttrPairs] = useState<Array<{ key: string; value: string }>>([]);
+  const [attrPairs, setAttrPairs] = useState<Array<{ key: string; value: string; mandatory?: boolean }>>([]);
+  const [weightMandatory, setWeightMandatory] = useState(false);
   const [busyMapping, setBusyMapping] = useState(false);
 
   const [linkQuery, setLinkQuery] = useState("");
@@ -118,20 +119,42 @@ export default function ProductForm() {
 
   const loadSuggestedAttributes = async () => {
     if (!id) return;
-    const res = await api.get<{ suggestions: string[] }>(
-      `/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(categoryId)}`,
-    );
+    const res = await api.get<{
+      suggestions: Array<{ name: string; label: string; mandatory: boolean }>;
+      weightMandatory: boolean;
+    }>(`/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(categoryId)}`);
+    setWeightMandatory(res.weightMandatory);
     const existingKeys = new Set(attrPairs.map((p) => p.key));
-    const newPairs = res.suggestions.filter((n) => !existingKeys.has(n)).map((n) => ({ key: n, value: "" }));
+    const newPairs = res.suggestions
+      .filter((a) => !existingKeys.has(a.name))
+      .map((a) => ({ key: a.name, value: "", mandatory: a.mandatory }));
     if (newPairs.length === 0) {
       toast.show("No attribute suggestions available - add manually");
     } else {
       setAttrPairs((prev) => [...prev, ...newPairs]);
+      const mandatoryCount = newPairs.filter((p) => p.mandatory).length;
+      if (mandatoryCount > 0) {
+        toast.show(`${mandatoryCount} of the added attributes are required by Daraz for this category`);
+      }
     }
+  };
+
+  const missingMandatoryFields = () => {
+    const missingAttrs = attrPairs.filter((p) => p.mandatory && p.key.trim() && !p.value.trim()).map((p) => p.key);
+    const missingWeight = weightMandatory && variants.some((v) => v.sku.trim() && !v.packageWeightKg.trim());
+    return { missingAttrs, missingWeight };
   };
 
   const saveMapping = async (andSync: boolean) => {
     if (!id) return;
+    if (andSync) {
+      const { missingAttrs, missingWeight } = missingMandatoryFields();
+      if (missingAttrs.length > 0 || missingWeight) {
+        const parts = [...missingAttrs, ...(missingWeight ? ["Weight (kg)"] : [])];
+        toast.show(`Daraz requires a value for: ${parts.join(", ")}`, { isError: true });
+        return;
+      }
+    }
     setBusyMapping(true);
     try {
       const attributes = Object.fromEntries(attrPairs.filter((p) => p.key.trim()).map((p) => [p.key, p.value]));
@@ -226,7 +249,7 @@ export default function ProductForm() {
                   <th>Price</th>
                   <th>Compare-at</th>
                   <th>Quantity</th>
-                  <th>Weight (kg)</th>
+                  <th>Weight (kg){weightMandatory && <span className="required-mark"> *required</span>}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -259,6 +282,7 @@ export default function ProductForm() {
                         step="0.01"
                         value={v.packageWeightKg}
                         onChange={(e) => updateVariant(i, "packageWeightKg", e.target.value)}
+                        className={weightMandatory && v.sku.trim() && !v.packageWeightKg.trim() ? "field-missing" : ""}
                       />
                     </td>
                     <td>
@@ -347,7 +371,9 @@ export default function ProductForm() {
                     value={p.value}
                     onChange={(e) => updateAttrRow(i, "value", e.target.value)}
                     style={{ maxWidth: 260 }}
+                    className={p.mandatory && !p.value.trim() ? "field-missing" : ""}
                   />
+                  {p.mandatory && <span className="required-mark">*required</span>}
                   <button className="plain critical" onClick={() => removeAttrRow(i)}>
                     Remove
                   </button>
