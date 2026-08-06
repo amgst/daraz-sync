@@ -38,6 +38,36 @@ interface RequestOptions {
   method?: "GET" | "POST";
 }
 
+// Daraz's write-endpoint validation errors come back in the seller
+// account's configured market language (Urdu, for this PK account) -
+// confirmed live that the `language_code` request param (which does work on
+// the read-only category endpoints) has no effect here, and there's no
+// other documented override. Best-effort substring translation of the
+// specific Urdu fragments seen in practice, so this app's own error display
+// stays in English even when Daraz's raw text doesn't. Not exhaustive -
+// anything not in this table passes through untranslated.
+const DARAZ_UR_EN_PHRASES: Array<[string, string]> = [
+  ["قیمت اور اسٹاک", "Price and Stock"],
+  ["پیکیج کا وزن (کلوگرام)", "Package Weight (kg)"],
+  ["پیکیج کی اونچائی (سینٹی میٹر)", "Package Height (cm)"],
+  ["پیکیج کی لمبائی (سینٹی میٹر)", "Package Length (cm)"],
+  ["پیکیج کی چوڑائی (سینٹی میٹر)", "Package Width (cm)"],
+  [
+    "آٹریبوٹس کی قدر جو آپ داخل کرتے ہیں دی گئی ڈراپ ڈاؤن فہرست میں شامل نہیں ہے۔ غلطی سے بچنے کے لیے براہ کرم ڈراپ ڈاؤن سے منتخب کریں",
+    "The value you entered is not in the allowed dropdown list. Please select a value from the dropdown instead.",
+  ],
+  ["درکار ہے لیکن غائب ہے۔ براہ کرم دوبارہ اپ لوڈ کرنے سے پہلے معلومات کو پُر کریں۔", "is required but missing. Please fill it in before re-uploading."],
+  ["cannot be blank. Kindly input the information before re-uploading.", "cannot be blank. Please fill it in before re-uploading."],
+];
+
+function translateDarazMessage(message: string): string {
+  let translated = message;
+  for (const [ur, en] of DARAZ_UR_EN_PHRASES) {
+    translated = translated.split(ur).join(en);
+  }
+  return translated;
+}
+
 export class DarazApiError extends Error {
   code?: string;
   detail?: unknown;
@@ -59,7 +89,8 @@ export class DarazApiError extends Error {
         if (!d || typeof d !== "object") return undefined;
         const { field, message } = d as { field?: unknown; message?: unknown };
         if (typeof message !== "string") return undefined;
-        return typeof field === "string" && field ? `[${field}] ${message}` : message;
+        const translated = translateDarazMessage(message);
+        return typeof field === "string" && field ? `[${field}] ${translated}` : translated;
       })
       .filter((m): m is string => typeof m === "string");
     return parts.length ? `${this.message} - ${parts.join("; ")}` : this.message;
