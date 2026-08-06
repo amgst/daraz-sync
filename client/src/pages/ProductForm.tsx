@@ -49,17 +49,20 @@ export default function ProductForm() {
   const [imagesText, setImagesText] = useState("");
   const [variants, setVariants] = useState<VariantRow[]>([emptyVariant()]);
   const [savingBasic, setSavingBasic] = useState(false);
+  const [basicError, setBasicError] = useState<string | null>(null);
 
   const [product, setProduct] = useState<Product | null>(null);
   const [categoryId, setCategoryId] = useState("");
   const [attrPairs, setAttrPairs] = useState<Array<{ key: string; value: string; mandatory?: boolean }>>([]);
   const [requiredSkuFields, setRequiredSkuFields] = useState<string[]>([]);
   const [busyMapping, setBusyMapping] = useState(false);
+  const [mappingError, setMappingError] = useState<string | null>(null);
 
   const [linkQuery, setLinkQuery] = useState("");
   const [linkResults, setLinkResults] = useState<DarazExistingProduct[]>([]);
   const [searching, setSearching] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isNew) return;
@@ -118,6 +121,7 @@ export default function ProductForm() {
 
   const saveBasic = async () => {
     setSavingBasic(true);
+    setBasicError(null);
     const payload = buildBasicPayload();
     try {
       if (isNew) {
@@ -129,7 +133,7 @@ export default function ProductForm() {
         toast.show("Product saved");
       }
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : "Save failed", { isError: true });
+      setBasicError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSavingBasic(false);
     }
@@ -173,11 +177,12 @@ export default function ProductForm() {
 
   const saveMapping = async (andSync: boolean) => {
     if (!id) return;
+    setMappingError(null);
     if (andSync) {
       const { missingAttrs, missingDimensions } = missingMandatoryFields();
       if (missingAttrs.length > 0 || missingDimensions.length > 0) {
         const parts = [...missingAttrs, ...missingDimensions];
-        toast.show(`Daraz requires a value for: ${parts.join(", ")}`, { isError: true });
+        setMappingError(`Daraz requires a value for: ${parts.join(", ")}`);
         return;
       }
     }
@@ -198,7 +203,7 @@ export default function ProductForm() {
       const res = await api.get<{ product: Product }>(`/products/${id}`);
       setProduct(res.product);
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : "Save failed", { isError: true });
+      setMappingError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setBusyMapping(false);
     }
@@ -206,13 +211,14 @@ export default function ProductForm() {
 
   const searchDaraz = async () => {
     setSearching(true);
+    setSearchError(null);
     try {
       const res = await api.get<{ results: DarazExistingProduct[] }>(
         `/products/search/daraz?q=${encodeURIComponent(linkQuery)}`,
       );
       setLinkResults(res.results);
     } catch (err) {
-      toast.show(err instanceof Error ? err.message : "Search failed", { isError: true });
+      setSearchError(err instanceof Error ? err.message : "Search failed");
     } finally {
       setSearching(false);
     }
@@ -345,6 +351,7 @@ export default function ProductForm() {
               {savingBasic ? "Saving..." : isNew ? "Create product" : "Save product"}
             </button>
           </div>
+          {basicError && <p className="error-text">{basicError}</p>}
         </div>
       </div>
 
@@ -369,6 +376,7 @@ export default function ProductForm() {
                 {searching ? "Searching..." : "Search Daraz"}
               </button>
             </div>
+            {searchError && <p className="error-text">{searchError}</p>}
             {linkResults.map((r) => (
               <div className="list-item" key={r.item_id}>
                 <div className="grow">
@@ -435,7 +443,7 @@ export default function ProductForm() {
                 Save & sync now
               </button>
             </div>
-            {product?.lastError && <p className="error-text">{product.lastError}</p>}
+            {(mappingError ?? product?.lastError) && <p className="error-text">{mappingError ?? product?.lastError}</p>}
           </div>
         </>
       )}
