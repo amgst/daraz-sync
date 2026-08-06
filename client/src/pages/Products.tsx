@@ -7,9 +7,27 @@ export default function Products() {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [pulling, setPulling] = useState(false);
   const [importingAll, setImportingAll] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const toast = useToast();
 
   const load = () => api.get<{ products: Product[] }>("/products").then((r) => setProducts(r.products));
+
+  const deleteProduct = async (p: Product) => {
+    const warning = p.darazItemId
+      ? `"${p.title}" is linked to Daraz item ${p.darazItemId}. Deleting only removes it from this app's tracking - it will NOT delete or unlist the product on Daraz itself. Continue?`
+      : `Delete "${p.title}"? This only removes it from this app - it was never synced to Daraz.`;
+    if (!window.confirm(warning)) return;
+    setDeletingId(p.id);
+    try {
+      await api.delete(`/products/${p.id}`);
+      setProducts((prev) => prev?.filter((x) => x.id !== p.id) ?? null);
+      toast.show("Product removed");
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : "Delete failed", { isError: true });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -111,6 +129,9 @@ export default function Products() {
                   <Link to={`/products/${p.id}`}>
                     <button>{p.syncStatus === "unmapped" ? "Map category" : "Edit"}</button>
                   </Link>
+                  <button className="critical" onClick={() => deleteProduct(p)} disabled={deletingId === p.id}>
+                    {deletingId === p.id ? "Deleting..." : "Delete"}
+                  </button>
                 </div>
               </div>
             );
