@@ -224,7 +224,13 @@ router.get("/:id/suggested-attributes", async (req, res) => {
     // them here just invites a duplicate, blank override (see buildProductPayload).
     const suggestions = categoryAttributes
       .filter((a) => !RESERVED_ATTRIBUTE_KEYS.has(a.name))
-      .map((a) => ({ name: a.name, label: a.label, mandatory: a.mandatory, options: a.options }));
+      .map((a) => ({
+        name: a.name,
+        label: a.label,
+        mandatory: a.mandatory,
+        options: a.options,
+        skuLevel: a.attributeType === "sku",
+      }));
     const requiredSkuFields = categoryAttributes
       .filter((a) => SKU_DIMENSION_FIELDS.includes(a.name) && a.mandatory)
       .map((a) => a.name);

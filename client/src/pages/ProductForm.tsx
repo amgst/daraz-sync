@@ -54,7 +54,7 @@ export default function ProductForm() {
   const [product, setProduct] = useState<Product | null>(null);
   const [categoryId, setCategoryId] = useState("");
   const [attrPairs, setAttrPairs] = useState<
-    Array<{ key: string; value: string; mandatory?: boolean; options?: string[] }>
+    Array<{ key: string; value: string; mandatory?: boolean; options?: string[]; skuLevel?: boolean }>
   >([]);
   const [requiredSkuFields, setRequiredSkuFields] = useState<string[]>([]);
   const [busyMapping, setBusyMapping] = useState(false);
@@ -149,7 +149,7 @@ export default function ProductForm() {
   const loadSuggestedAttributes = async () => {
     if (!id) return;
     const res = await api.get<{
-      suggestions: Array<{ name: string; label: string; mandatory: boolean; options?: string[] }>;
+      suggestions: Array<{ name: string; label: string; mandatory: boolean; options?: string[]; skuLevel: boolean }>;
       requiredSkuFields: string[];
     }>(`/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(categoryId)}`);
     setRequiredSkuFields(res.requiredSkuFields);
@@ -168,6 +168,7 @@ export default function ProductForm() {
         value: englishMirrorDefaults[a.name] ?? "",
         mandatory: a.mandatory,
         options: a.options,
+        skuLevel: a.skuLevel,
       }));
     if (newPairs.length === 0) {
       toast.show("No attribute suggestions available - add manually");
@@ -494,6 +495,7 @@ export default function ProductForm() {
                     />
                   )}
                   {p.mandatory && <span className="required-mark">*required</span>}
+                  {p.skuLevel && <span className="subdued small">(per-SKU)</span>}
                   <button className="plain critical" onClick={() => removeAttrRow(i)}>
                     Remove
                   </button>

@@ -590,6 +590,13 @@ export interface DarazCategoryAttribute {
   // with no options here at all (its values come from a separate brand
   // lookup this app doesn't implement, so it stays free text).
   options?: string[];
+  // "normal" -> belongs in the Product-level <Attributes> block.
+  // "sku" -> belongs inside each <Sku> tag instead - confirmed live that
+  // Daraz's create/update APIs silently accept a "sku"-type attribute (e.g.
+  // "color_family") sent as a Product attribute without erroring, but Seller
+  // Center then shows the SKU as still missing that mandatory value, since
+  // it never reached the field Daraz actually reads.
+  attributeType: "normal" | "sku";
 }
 
 // Field names for the mandatory flag (and the array's location in the
@@ -609,10 +616,12 @@ function normalizeCategoryAttribute(raw: unknown): DarazCategoryAttribute | null
         .map((o) => (o && typeof o === "object" ? (o as { name?: unknown }).name : o))
         .filter((n): n is string => typeof n === "string")
     : undefined;
+  const attributeType = obj.attribute_type === "sku" ? "sku" : "normal";
   return {
     name,
     label: typeof label === "string" ? label : name,
     mandatory,
+    attributeType,
     ...(options && options.length ? { options } : {}),
   };
 }

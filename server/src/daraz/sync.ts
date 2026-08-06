@@ -8,6 +8,7 @@ import {
   uploadImage,
   getProductDetail,
   getProducts,
+  getCategoryAttributes,
   effectivePrice,
   DarazApiError,
   type CreateProductInput,
@@ -93,12 +94,30 @@ export async function syncProduct(
     const darazImageUrls = await uploadProductImages(darazOpts, imageUrls);
     const skuIds = await skuIdsBySellerSku();
 
+    // The generic attribute map (attributesJson) is a flat key/value bag
+    // filled from Daraz's own category schema suggestions, but that schema
+    // mixes Product-level attributes with Sku-level ones (e.g. a mandatory
+    // "color_family" is Sku-level even for a single-SKU product) - Daraz's
+    // create/update APIs don't reject a Sku-level attribute sent as a
+    // Product one, they just silently ignore it, so this has to route each
+    // key correctly rather than dumping everything into <Attributes>.
+    const allAttributes = JSON.parse(product.attributesJson) as Record<string, string>;
+    const categoryAttributes = await getCategoryAttributes(darazOpts, product.darazCategoryId).catch(() => []);
+    const skuLevelKeys = new Set(
+      categoryAttributes.filter((a) => a.attributeType === "sku").map((a) => a.name),
+    );
+    const productAttributes: Record<string, string> = {};
+    const skuLevelAttributes: Record<string, string> = {};
+    for (const [key, value] of Object.entries(allAttributes)) {
+      (skuLevelKeys.has(key) ? skuLevelAttributes : productAttributes)[key] = value;
+    }
+
     const input: CreateProductInput = {
       primaryCategoryId: product.darazCategoryId,
       name: product.title,
       description: product.descriptionHtml || product.title,
       brandName: product.vendor || undefined,
-      attributes: JSON.parse(product.attributesJson) as Record<string, string>,
+      attributes: productAttributes,
       images: darazImageUrls,
       skus: product.variants.map((variant) => ({
         SellerSku: variant.sku,
@@ -110,6 +129,7 @@ export async function syncProduct(
         ...(variant.packageLengthCm != null ? { package_length: String(variant.packageLengthCm) } : {}),
         ...(variant.packageWidthCm != null ? { package_width: String(variant.packageWidthCm) } : {}),
         ...(variant.packageHeightCm != null ? { package_height: String(variant.packageHeightCm) } : {}),
+        ...skuLevelAttributes,
       })),
     };
 
