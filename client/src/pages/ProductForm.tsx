@@ -78,24 +78,25 @@ export default function ProductForm() {
   const addVariant = () => setVariants((prev) => [...prev, emptyVariant()]);
   const removeVariant = (index: number) => setVariants((prev) => prev.filter((_, i) => i !== index));
 
+  const buildBasicPayload = () => ({
+    title,
+    descriptionHtml,
+    vendor,
+    images: imagesText.split("\n").map((s) => s.trim()).filter(Boolean),
+    variants: variants
+      .filter((v) => v.sku.trim() && v.price.trim())
+      .map((v) => ({
+        sku: v.sku.trim(),
+        price: v.price.trim(),
+        compareAtPrice: v.compareAtPrice.trim() || undefined,
+        quantity: Number(v.quantity) || 0,
+        packageWeightKg: v.packageWeightKg.trim() ? Number(v.packageWeightKg) : undefined,
+      })),
+  });
+
   const saveBasic = async () => {
     setSavingBasic(true);
-    const images = imagesText.split("\n").map((s) => s.trim()).filter(Boolean);
-    const payload = {
-      title,
-      descriptionHtml,
-      vendor,
-      images,
-      variants: variants
-        .filter((v) => v.sku.trim() && v.price.trim())
-        .map((v) => ({
-          sku: v.sku.trim(),
-          price: v.price.trim(),
-          compareAtPrice: v.compareAtPrice.trim() || undefined,
-          quantity: Number(v.quantity) || 0,
-          packageWeightKg: v.packageWeightKg.trim() ? Number(v.packageWeightKg) : undefined,
-        })),
-    };
+    const payload = buildBasicPayload();
     try {
       if (isNew) {
         const res = await api.post<{ product: Product }>("/products", payload);
@@ -157,6 +158,10 @@ export default function ProductForm() {
     }
     setBusyMapping(true);
     try {
+      // Basic info (title/variants/weight) lives on a separate "Save product"
+      // button in the UI - persist it here too so a sync always reflects
+      // what's on screen, not whatever was last explicitly saved.
+      await api.put(`/products/${id}`, buildBasicPayload());
       const attributes = Object.fromEntries(attrPairs.filter((p) => p.key.trim()).map((p) => [p.key, p.value]));
       await api.put(`/products/${id}/mapping`, { categoryId, attributes });
       if (andSync) {
