@@ -151,10 +151,17 @@ export default function ProductForm() {
       requiredSkuFields: string[];
     }>(`/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(categoryId)}`);
     setRequiredSkuFields(res.requiredSkuFields);
+    // Several categories require English-mirror fields (name_en/description_en)
+    // alongside the base Title/Description this app already collects - default
+    // them from those instead of making the user retype the same text.
+    const englishMirrorDefaults: Record<string, string> = {
+      name_en: title,
+      description_en: descriptionHtml,
+    };
     const existingKeys = new Set(attrPairs.map((p) => p.key));
     const newPairs = res.suggestions
       .filter((a) => !existingKeys.has(a.name))
-      .map((a) => ({ key: a.name, value: "", mandatory: a.mandatory }));
+      .map((a) => ({ key: a.name, value: englishMirrorDefaults[a.name] ?? "", mandatory: a.mandatory }));
     if (newPairs.length === 0) {
       toast.show("No attribute suggestions available - add manually");
     } else {
