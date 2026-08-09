@@ -11,9 +11,15 @@ import {
   SKU_DIMENSION_FIELDS,
 } from "../daraz/client.js";
 import { productsCol, serializeProduct, type ProductDoc, type VariantDoc } from "../daraz/models.js";
+import { generateProductDraft } from "../ai/generateProduct.js";
 
 const router = Router();
 router.use(requireAuth);
+
+// Kept in sync with sync.ts's autoMirrorSources - these get derived from
+// Title/Description/Highlights automatically, so they're excluded from the
+// suggested-attributes list rather than making the user fill in duplicates.
+const AUTO_MIRRORED_ATTRIBUTE_KEYS = new Set(["name_en", "description_en", "short_description", "short_description_en"]);
 
 router.get("/", async (_req, res) => {
   const snap = await productsCol.orderBy("updatedAt", "desc").get();
@@ -21,10 +27,11 @@ router.get("/", async (_req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const { title, descriptionHtml, vendor, images, variants } = req.body as {
+  const { title, descriptionHtml, vendor, highlights, images, variants } = req.body as {
     title: string;
     descriptionHtml?: string;
     vendor?: string;
+    highlights?: string;
     images?: string[];
     variants: Array<{
       sku: string;
@@ -49,6 +56,7 @@ router.post("/", async (req, res) => {
     title,
     descriptionHtml: descriptionHtml ?? null,
     vendor: vendor ?? null,
+    highlights: highlights ?? null,
     imagesJson: JSON.stringify(images ?? []),
     darazCategoryId: null,
     attributesJson: null,
@@ -77,6 +85,22 @@ router.post("/", async (req, res) => {
   res.status(201).json({ product: serializeProduct(docRef.id, data) });
 });
 
+// Draft a product's title/description/highlights/vendor from a rough text
+// prompt via Claude - the user still reviews and saves it like any manual edit.
+router.post("/generate", async (req, res) => {
+  const { prompt } = req.body as { prompt?: string };
+  if (!prompt?.trim()) {
+    res.status(400).json({ error: "Prompt is required" });
+    return;
+  }
+  try {
+    const draft = await generateProductDraft(prompt.trim());
+    res.json({ draft });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   const snap = await productsCol.doc(req.params.id).get();
   if (!snap.exists) {
@@ -87,10 +111,11 @@ router.get("/:id", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
-  const { title, descriptionHtml, vendor, images, variants } = req.body as {
+  const { title, descriptionHtml, vendor, highlights, images, variants } = req.body as {
     title?: string;
     descriptionHtml?: string;
     vendor?: string;
+    highlights?: string;
     images?: string[];
     variants?: Array<{
       id?: string;
@@ -116,6 +141,7 @@ router.put("/:id", async (req, res) => {
   if (title !== undefined) update.title = title;
   if (descriptionHtml !== undefined) update.descriptionHtml = descriptionHtml;
   if (vendor !== undefined) update.vendor = vendor;
+  if (highlights !== undefined) update.highlights = highlights;
   if (images !== undefined) update.imagesJson = JSON.stringify(images);
 
   if (variants) {
@@ -222,8 +248,11 @@ router.get("/:id/suggested-attributes", async (req, res) => {
     // brand/package dimensions) alongside real custom attributes, but this
     // app already sends those via their own dedicated inputs - suggesting
     // them here just invites a duplicate, blank override (see buildProductPayload).
+    // AUTO_MIRRORED_ATTRIBUTE_KEYS is UI-only - syncProduct still derives and
+    // sends these from Title/Description/Highlights, they just don't need a
+    // manual duplicate row in the mapping UI.
     const suggestions = categoryAttributes
-      .filter((a) => !RESERVED_ATTRIBUTE_KEYS.has(a.name))
+      .filter((a) => !RESERVED_ATTRIBUTE_KEYS.has(a.name) && !AUTO_MIRRORED_ATTRIBUTE_KEYS.has(a.name))
       .map((a) => ({
         name: a.name,
         label: a.label,

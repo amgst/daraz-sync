@@ -40,6 +40,9 @@ export interface ProductDoc {
   title: string;
   descriptionHtml: string | null;
   vendor: string | null;
+  // Daraz's "Highlights" field - distinct from descriptionHtml (Daraz's own
+  // "Product Description"), not just a shorter version of it.
+  highlights: string | null;
   imagesJson: string;
   darazCategoryId: string | null;
   attributesJson: string | null;
@@ -61,6 +64,7 @@ export function serializeProduct(id: string, data: ProductDoc) {
     title: data.title,
     descriptionHtml: data.descriptionHtml,
     vendor: data.vendor,
+    highlights: data.highlights,
     imagesJson: data.imagesJson,
     darazCategoryId: data.darazCategoryId,
     attributesJson: data.attributesJson,

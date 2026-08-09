@@ -112,6 +112,27 @@ export async function syncProduct(
       (skuLevelKeys.has(key) ? skuLevelAttributes : productAttributes)[key] = value;
     }
 
+    // Many categories require English-mirror fields (name_en/description_en)
+    // and a separate "Highlights" field (short_description/short_description_en,
+    // distinct from the Product Description) alongside the base title and
+    // description this app already collects. Sellers who only work in one
+    // language shouldn't have to retype the same text into duplicate rows -
+    // auto-derive these from Title/Description/Highlights whenever the
+    // category actually calls for them and the user hasn't already provided
+    // an explicit override via a generic attribute.
+    const autoMirrorSources: Record<string, string> = {
+      name_en: product.title,
+      description_en: product.descriptionHtml || product.title,
+      short_description: product.highlights || product.title,
+      short_description_en: product.highlights || product.title,
+    };
+    for (const attr of categoryAttributes) {
+      const mirrorValue = autoMirrorSources[attr.name];
+      if (mirrorValue === undefined) continue;
+      const target = attr.attributeType === "sku" ? skuLevelAttributes : productAttributes;
+      if (!target[attr.name]?.trim()) target[attr.name] = mirrorValue;
+    }
+
     const input: CreateProductInput = {
       primaryCategoryId: product.darazCategoryId,
       name: product.title,
@@ -186,6 +207,7 @@ export async function importDarazProduct(darazItemId: string): Promise<ImportRes
     title: detail.name,
     descriptionHtml: detail.description ?? null,
     vendor: detail.brand ?? null,
+    highlights: null,
     imagesJson: JSON.stringify(detail.images),
     darazItemId: detail.item_id,
     darazSkuId: detail.skus[0]?.SkuId ?? null,

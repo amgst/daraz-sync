@@ -48,6 +48,7 @@ export interface Product {
   title: string;
   descriptionHtml: string | null;
   vendor: string | null;
+  highlights: string | null;
   imagesJson: string;
   darazCategoryId: string | null;
   attributesJson: string | null;

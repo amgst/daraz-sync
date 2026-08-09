@@ -58,9 +58,28 @@ const DARAZ_UR_EN_PHRASES: Array<[string, string]> = [
   ],
   ["درکار ہے لیکن غائب ہے۔ براہ کرم دوبارہ اپ لوڈ کرنے سے پہلے معلومات کو پُر کریں۔", "is required but missing. Please fill it in before re-uploading."],
   ["cannot be blank. Kindly input the information before re-uploading.", "cannot be blank. Please fill it in before re-uploading."],
+  [
+    "براہ کرم نوٹ کریں کہ خصوصی قیمت کی معلومات غلط/غائب ہے۔ براہ کرم خصوصی قیمت اور اپنی شروعات اور اختتامی تاریخیں دونوں چیک کریں۔",
+    "Special price information is incorrect or missing. Please check the special price and both its start and end dates - all three are required together.",
+  ],
 ];
 
-function translateDarazMessage(message: string): string {
+// Preferred over phrase substitution when available: Daraz's `code` value on
+// each detail entry (e.g. "BIZ_CHECK_MAIN_IMAGE_REQUIRE") is a stable,
+// already-English identifier regardless of account locale, so a template
+// keyed on it is immune to Urdu phrasing/wording changes in a way that
+// matching the free-text message never can be. Falls back to phrase
+// substitution on the raw message for anything not in this table yet.
+const DARAZ_ERROR_CODE_MESSAGES: Record<string, string> = {
+  BIZ_CHECK_MAIN_IMAGE_REQUIRE: "A main product image is required.",
+  BIZ_CHECK_SPECIAL_PRICE_FROM_DATE_MISSING:
+    "Special price start date is missing - special price, start date, and end date must all be set together (or none of them).",
+  BIZ_CHECK_SPECIAL_PRICE_TO_DATE_MISSING:
+    "Special price end date is missing - special price, start date, and end date must all be set together (or none of them).",
+};
+
+function translateDarazMessage(message: string, code?: string): string {
+  if (code && DARAZ_ERROR_CODE_MESSAGES[code]) return DARAZ_ERROR_CODE_MESSAGES[code];
   let translated = message;
   for (const [ur, en] of DARAZ_UR_EN_PHRASES) {
     translated = translated.split(ur).join(en);
@@ -87,9 +106,9 @@ export class DarazApiError extends Error {
     const parts = this.detail
       .map((d) => {
         if (!d || typeof d !== "object") return undefined;
-        const { field, message } = d as { field?: unknown; message?: unknown };
+        const { field, message, code } = d as { field?: unknown; message?: unknown; code?: unknown };
         if (typeof message !== "string") return undefined;
-        const translated = translateDarazMessage(message);
+        const translated = translateDarazMessage(message, typeof code === "string" ? code : undefined);
         return typeof field === "string" && field ? `[${field}] ${translated}` : translated;
       })
       .filter((m): m is string => typeof m === "string");

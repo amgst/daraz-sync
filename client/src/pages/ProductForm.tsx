@@ -46,10 +46,15 @@ export default function ProductForm() {
   const [title, setTitle] = useState("");
   const [descriptionHtml, setDescriptionHtml] = useState("");
   const [vendor, setVendor] = useState("");
+  const [highlights, setHighlights] = useState("");
   const [imagesText, setImagesText] = useState("");
   const [variants, setVariants] = useState<VariantRow[]>([emptyVariant()]);
   const [savingBasic, setSavingBasic] = useState(false);
   const [basicError, setBasicError] = useState<string | null>(null);
+
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const [product, setProduct] = useState<Product | null>(null);
   const [categoryId, setCategoryId] = useState("");
@@ -74,6 +79,7 @@ export default function ProductForm() {
       setTitle(p.title);
       setDescriptionHtml(p.descriptionHtml ?? "");
       setVendor(p.vendor ?? "");
+      setHighlights(p.highlights ?? "");
       setImagesText((JSON.parse(p.imagesJson) as string[]).join("\n"));
       setVariants(
         p.variants.length
@@ -106,6 +112,7 @@ export default function ProductForm() {
     title,
     descriptionHtml,
     vendor,
+    highlights,
     images: imagesText.split("\n").map((s) => s.trim()).filter(Boolean),
     variants: variants
       .filter((v) => v.sku.trim() && v.price.trim())
@@ -141,6 +148,26 @@ export default function ProductForm() {
     }
   };
 
+  const generateWithAi = async () => {
+    if (!aiPrompt.trim()) return;
+    setGenerating(true);
+    setAiError(null);
+    try {
+      const res = await api.post<{
+        draft: { title: string; descriptionHtml: string; highlights: string; vendor: string };
+      }>("/products/generate", { prompt: aiPrompt.trim() });
+      setTitle(res.draft.title);
+      setDescriptionHtml(res.draft.descriptionHtml);
+      setHighlights(res.draft.highlights);
+      setVendor(res.draft.vendor);
+      toast.show("Draft generated - review before saving");
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const addAttrRow = () => setAttrPairs((prev) => [...prev, { key: "", value: "" }]);
   const removeAttrRow = (i: number) => setAttrPairs((prev) => prev.filter((_, idx) => idx !== i));
   const updateAttrRow = (i: number, field: "key" | "value", value: string) =>
@@ -153,19 +180,16 @@ export default function ProductForm() {
       requiredSkuFields: string[];
     }>(`/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(categoryId)}`);
     setRequiredSkuFields(res.requiredSkuFields);
-    // Several categories require English-mirror fields (name_en/description_en)
-    // alongside the base Title/Description this app already collects - default
-    // them from those instead of making the user retype the same text.
-    const englishMirrorDefaults: Record<string, string> = {
-      name_en: title,
-      description_en: descriptionHtml,
-    };
+    // name_en/description_en/short_description(_en) don't show up here at
+    // all - the server derives them from Title/Description/Highlights
+    // automatically (see sync.ts's autoMirrorSources), so there's nothing
+    // to prompt the user to fill in for those.
     const existingKeys = new Set(attrPairs.map((p) => p.key));
     const newPairs = res.suggestions
       .filter((a) => !existingKeys.has(a.name))
       .map((a) => ({
         key: a.name,
-        value: englishMirrorDefaults[a.name] ?? "",
+        value: "",
         mandatory: a.mandatory,
         options: a.options,
         skuLevel: a.skuLevel,
@@ -306,6 +330,28 @@ export default function ProductForm() {
       </div>
 
       <div className="card">
+        <h2>Generate with AI</h2>
+        <div className="stack">
+          <div className="field">
+            <label>Describe the product</label>
+            <textarea
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="e.g. wireless earbuds, black, active noise cancelling, 24h battery"
+            />
+          </div>
+          <button onClick={generateWithAi} disabled={generating || !aiPrompt.trim()}>
+            {generating ? "Generating..." : "Generate draft"}
+          </button>
+          {aiError && <p className="error-text">{aiError}</p>}
+          <span className="subdued small">
+            Fills in Title, Description, Highlights, and Brand below - review and edit before saving.
+            Pricing, SKUs, and category attributes are never AI-generated.
+          </span>
+        </div>
+      </div>
+
+      <div className="card">
         <h2>Basic info</h2>
         <div className="stack">
           <div className="field">
@@ -315,6 +361,14 @@ export default function ProductForm() {
           <div className="field">
             <label>Description</label>
             <textarea value={descriptionHtml} onChange={(e) => setDescriptionHtml(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Highlights</label>
+            <textarea value={highlights} onChange={(e) => setHighlights(e.target.value)} />
+            <span className="subdued small">
+              Daraz's separate "Highlights" field, distinct from Description - required by some
+              categories. Leave blank to fall back to the Title.
+            </span>
           </div>
           <div className="field">
             <label>Brand / vendor</label>
