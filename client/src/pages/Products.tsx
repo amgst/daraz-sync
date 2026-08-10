@@ -3,12 +3,22 @@ import { Link } from "react-router-dom";
 import { api, type Product } from "../api";
 import { useToast } from "../ToastContext";
 
+type View = "list" | "grid";
+
 export default function Products() {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [pulling, setPulling] = useState(false);
   const [importingAll, setImportingAll] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [view, setView] = useState<View>(
+    () => (localStorage.getItem("products-view") as View | null) ?? "list",
+  );
   const toast = useToast();
+
+  const changeView = (next: View) => {
+    setView(next);
+    localStorage.setItem("products-view", next);
+  };
 
   const load = () => api.get<{ products: Product[] }>("/products").then((r) => setProducts(r.products));
 
@@ -107,11 +117,62 @@ export default function Products() {
         </div>
       </div>
 
-      <div className="card">
-        {products.length === 0 ? (
+      {products.length > 0 && (
+        <div className="row end" style={{ marginBottom: -4 }}>
+          <div className="view-toggle">
+            <button
+              className={view === "list" ? "active" : ""}
+              onClick={() => changeView("list")}
+              aria-pressed={view === "list"}
+            >
+              List
+            </button>
+            <button
+              className={view === "grid" ? "active" : ""}
+              onClick={() => changeView("grid")}
+              aria-pressed={view === "grid"}
+            >
+              Cards
+            </button>
+          </div>
+        </div>
+      )}
+
+      {products.length === 0 ? (
+        <div className="card">
           <p className="subdued">No products yet. Create one to get started.</p>
-        ) : (
-          products.map((p) => {
+        </div>
+      ) : view === "grid" ? (
+        <div className="product-grid">
+          {products.map((p) => {
+            const images = JSON.parse(p.imagesJson) as string[];
+            return (
+              <div className="product-card" key={p.id}>
+                <img src={images[0] ?? ""} alt="" />
+                <div className="product-card-body">
+                  <div className="title">
+                    <Link to={`/products/${p.id}`}>{p.title}</Link>
+                  </div>
+                  <div className="meta">
+                    <span className={`badge ${p.syncStatus}`}>{p.syncStatus}</span>
+                    {p.darazItemId ? ` Daraz item ${p.darazItemId}` : ""}
+                  </div>
+                  <div className="actions">
+                    <Link to={`/products/${p.id}`}>
+                      <button>{p.syncStatus === "unmapped" ? "Map category" : "Edit"}</button>
+                    </Link>
+                    <button className="critical" onClick={() => deleteProduct(p)} disabled={deletingId === p.id}>
+                      {deletingId === p.id ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="card">
+          {products.map((p) => {
             const images = JSON.parse(p.imagesJson) as string[];
             return (
               <div className="list-item" key={p.id}>
@@ -135,9 +196,9 @@ export default function Products() {
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
     </>
   );
 }

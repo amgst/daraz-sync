@@ -166,6 +166,54 @@ button.plain { border-color: transparent; background: transparent; color: var(--
 .list-item .grow { flex: 1; min-width: 0; }
 .list-item .actions { display: flex; gap: 8px; flex-shrink: 0; }
 
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.view-toggle button {
+  border: none;
+  border-radius: 0;
+  background: var(--surface);
+  padding: 6px 12px;
+}
+.view-toggle button + button { border-left: 1px solid var(--border); }
+.view-toggle button.active { background: var(--accent); color: #fff; }
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.product-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.product-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.product-card-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.product-card .title { font-weight: 600; font-size: 13.5px; }
+.product-card .meta { color: var(--text-subdued); font-size: 12px; }
+.product-card .actions { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
+.product-card .actions button { flex: 1; }
+
 .subdued { color: var(--text-subdued); }
 .small { font-size: 12.5px; }
 .divider { height: 1px; background: var(--border); margin: 16px 0; }
