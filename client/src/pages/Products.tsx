@@ -5,6 +5,21 @@ import { useToast } from "../ToastContext";
 
 type View = "list" | "grid";
 
+const PLACEHOLDER_IMAGE =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23f5f6f8'/%3E%3Cpath d='M18 40l9-11 7 8 6-7 10 12H18z' fill='%23d5d8de'/%3E%3Ccircle cx='24' cy='22' r='5' fill='%23d5d8de'/%3E%3C/svg%3E";
+
+function ProductThumb({ src, alt }: { src?: string; alt: string }) {
+  return (
+    <img
+      src={src || PLACEHOLDER_IMAGE}
+      alt={alt}
+      onError={(e) => {
+        if (e.currentTarget.src !== PLACEHOLDER_IMAGE) e.currentTarget.src = PLACEHOLDER_IMAGE;
+      }}
+    />
+  );
+}
+
 export default function Products() {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [pulling, setPulling] = useState(false);
@@ -148,7 +163,7 @@ export default function Products() {
             const images = JSON.parse(p.imagesJson) as string[];
             return (
               <div className="product-card" key={p.id}>
-                <img src={images[0] ?? ""} alt="" />
+                <ProductThumb src={images[0]} alt={p.title} />
                 <div className="product-card-body">
                   <div className="title">
                     <Link to={`/products/${p.id}`}>{p.title}</Link>
@@ -176,7 +191,7 @@ export default function Products() {
             const images = JSON.parse(p.imagesJson) as string[];
             return (
               <div className="list-item" key={p.id}>
-                <img src={images[0] ?? ""} alt="" />
+                <ProductThumb src={images[0]} alt={p.title} />
                 <div className="grow">
                   <div className="title">
                     <Link to={`/products/${p.id}`}>{p.title}</Link>
