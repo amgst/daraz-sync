@@ -54,6 +54,7 @@ export interface Product {
   attributesJson: string | null;
   darazItemId: string | null;
   darazSkuId: string | null;
+  darazUrl: string | null;
   syncStatus: SyncStatus;
   lastSyncedAt: string | null;
   lastError: string | null;

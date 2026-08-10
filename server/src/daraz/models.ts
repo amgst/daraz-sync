@@ -1,5 +1,6 @@
 import { Timestamp } from "firebase-admin/firestore";
 import db from "../db.js";
+import { darazProductUrl } from "./countries.js";
 
 function toIso(value: Timestamp | null | undefined): string | null {
   return value ? value.toDate().toISOString() : null;
@@ -58,7 +59,11 @@ export interface ProductDoc {
 
 export const productsCol = db.collection("products");
 
-export function serializeProduct(id: string, data: ProductDoc) {
+// `country` is the connected Daraz account's country/site (there's only one
+// account for this app) - needed to build the storefront link since each
+// site has its own domain. Omitted (null darazUrl) where the caller hasn't
+// looked up the account, e.g. contexts that don't need the link.
+export function serializeProduct(id: string, data: ProductDoc, country?: string | null) {
   return {
     id,
     title: data.title,
@@ -70,6 +75,7 @@ export function serializeProduct(id: string, data: ProductDoc) {
     attributesJson: data.attributesJson,
     darazItemId: data.darazItemId,
     darazSkuId: data.darazSkuId,
+    darazUrl: data.darazItemId && country ? darazProductUrl(country, data.darazItemId) : null,
     syncStatus: data.syncStatus,
     lastSyncedAt: toIso(data.lastSyncedAt),
     lastError: data.lastError,

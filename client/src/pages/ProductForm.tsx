@@ -324,9 +324,16 @@ export default function ProductForm() {
           <h1>{isNew ? "New product" : `Edit: ${title || "Product"}`}</h1>
           {product?.darazItemId && <p className="subtitle">Currently linked to Daraz item {product.darazItemId}.</p>}
         </div>
-        <Link to="/products">
-          <button>Back to products</button>
-        </Link>
+        <div className="row">
+          {product?.darazUrl && (
+            <a href={product.darazUrl} target="_blank" rel="noopener noreferrer">
+              <button>View on Daraz</button>
+            </a>
+          )}
+          <Link to="/products">
+            <button>Back to products</button>
+          </Link>
+        </div>
       </div>
 
       <div className="card">

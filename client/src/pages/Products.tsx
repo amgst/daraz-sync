@@ -176,6 +176,11 @@ export default function Products() {
                     <Link to={`/products/${p.id}`}>
                       <button>{p.syncStatus === "unmapped" ? "Map category" : "Edit"}</button>
                     </Link>
+                    {p.darazUrl && (
+                      <a href={p.darazUrl} target="_blank" rel="noopener noreferrer">
+                        <button>View on Daraz</button>
+                      </a>
+                    )}
                     <button className="critical" onClick={() => deleteProduct(p)} disabled={deletingId === p.id}>
                       {deletingId === p.id ? "Deleting..." : "Delete"}
                     </button>
@@ -205,6 +210,11 @@ export default function Products() {
                   <Link to={`/products/${p.id}`}>
                     <button>{p.syncStatus === "unmapped" ? "Map category" : "Edit"}</button>
                   </Link>
+                  {p.darazUrl && (
+                    <a href={p.darazUrl} target="_blank" rel="noopener noreferrer">
+                      <button>View on Daraz</button>
+                    </a>
+                  )}
                   <button className="critical" onClick={() => deleteProduct(p)} disabled={deletingId === p.id}>
                     {deletingId === p.id ? "Deleting..." : "Delete"}
                   </button>

@@ -10,7 +10,7 @@ import {
   RESERVED_ATTRIBUTE_KEYS,
   SKU_DIMENSION_FIELDS,
 } from "../daraz/client.js";
-import { productsCol, serializeProduct, type ProductDoc, type VariantDoc } from "../daraz/models.js";
+import { productsCol, accountRef, serializeProduct, type ProductDoc, type DarazAccountDoc, type VariantDoc } from "../daraz/models.js";
 import { generateProductDraft } from "../ai/generateProduct.js";
 
 const router = Router();
@@ -21,9 +21,17 @@ router.use(requireAuth);
 // suggested-attributes list rather than making the user fill in duplicates.
 const AUTO_MIRRORED_ATTRIBUTE_KEYS = new Set(["name_en", "description_en", "short_description", "short_description_en"]);
 
+// There's only one Daraz account connection for this app - fetched here
+// (rather than baked into serializeProduct) so callers that don't need the
+// storefront link can skip the extra read.
+async function connectedCountry(): Promise<string | null> {
+  const snap = await accountRef.get();
+  return snap.exists ? (snap.data() as DarazAccountDoc).country : null;
+}
+
 router.get("/", async (_req, res) => {
-  const snap = await productsCol.orderBy("updatedAt", "desc").get();
-  res.json({ products: snap.docs.map((d) => serializeProduct(d.id, d.data() as ProductDoc)) });
+  const [snap, country] = await Promise.all([productsCol.orderBy("updatedAt", "desc").get(), connectedCountry()]);
+  res.json({ products: snap.docs.map((d) => serializeProduct(d.id, d.data() as ProductDoc, country)) });
 });
 
 router.post("/", async (req, res) => {
@@ -102,12 +110,12 @@ router.post("/generate", async (req, res) => {
 });
 
 router.get("/:id", async (req, res) => {
-  const snap = await productsCol.doc(req.params.id).get();
+  const [snap, country] = await Promise.all([productsCol.doc(req.params.id).get(), connectedCountry()]);
   if (!snap.exists) {
     res.status(404).json({ error: "Product not found" });
     return;
   }
-  res.json({ product: serializeProduct(snap.id, snap.data() as ProductDoc) });
+  res.json({ product: serializeProduct(snap.id, snap.data() as ProductDoc, country) });
 });
 
 router.put("/:id", async (req, res) => {
