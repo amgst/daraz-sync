@@ -1,16 +1,18 @@
 import { Router } from "express";
-import { requireAuth } from "../authMiddleware.js";
+import { requireAuth, requireStore } from "../authMiddleware.js";
 import { importDarazOrders } from "../daraz/orders.js";
 import { ordersCol, serializeOrder, type OrderDoc } from "../daraz/models.js";
 
 const router = Router();
 router.use(requireAuth);
+router.use(requireStore);
 
 router.get("/", async (req, res) => {
+  const storeId = req.session!.currentStoreId!;
   const status = String(req.query.status ?? "");
   const q = String(req.query.q ?? "").trim().toLowerCase();
 
-  const snap = await ordersCol.get();
+  const snap = await ordersCol.where("storeId", "==", storeId).get();
   let docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as OrderDoc }));
 
   if (status) {
@@ -43,16 +45,16 @@ router.get("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   const snap = await ordersCol.doc(req.params.id).get();
-  if (!snap.exists) {
+  if (!snap.exists || (snap.data() as OrderDoc).storeId !== req.session!.currentStoreId!) {
     res.status(404).json({ error: "Order not found" });
     return;
   }
   res.json({ order: serializeOrder(snap.id, snap.data() as OrderDoc) });
 });
 
-router.post("/import", async (_req, res) => {
+router.post("/import", async (req, res) => {
   try {
-    const result = await importDarazOrders();
+    const result = await importDarazOrders(req.session!.currentStoreId!);
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });

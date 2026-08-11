@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { importDarazOrders } from "../daraz/orders.js";
 import { pullPriceStockFromDaraz } from "../daraz/sync.js";
+import { storesCol } from "../daraz/models.js";
 
 const router = Router();
 
@@ -15,28 +16,39 @@ router.get("/sync", async (req, res) => {
     return;
   }
 
-  const result: {
-    orders?: { imported: number; updated: number };
-    ordersError?: string;
-    products?: { productsChecked: number; productsUpdated: number; errors: string[] };
-    productsError?: string;
-  } = {};
+  const storesSnap = await storesCol.get();
 
-  // Each half runs independently - one failing (e.g. no Daraz account
-  // connected yet) shouldn't block the other from still running.
-  try {
-    result.orders = await importDarazOrders();
-  } catch (error) {
-    result.ordersError = error instanceof Error ? error.message : String(error);
+  const results: Record<
+    string,
+    {
+      orders?: { imported: number; updated: number };
+      ordersError?: string;
+      products?: { productsChecked: number; productsUpdated: number; errors: string[] };
+      productsError?: string;
+    }
+  > = {};
+
+  // Each store, and each half within a store, runs independently - one
+  // store (or one half) failing shouldn't block the rest.
+  for (const storeDoc of storesSnap.docs) {
+    const storeResult: (typeof results)[string] = {};
+
+    try {
+      storeResult.orders = await importDarazOrders(storeDoc.id);
+    } catch (error) {
+      storeResult.ordersError = error instanceof Error ? error.message : String(error);
+    }
+
+    try {
+      storeResult.products = await pullPriceStockFromDaraz(storeDoc.id);
+    } catch (error) {
+      storeResult.productsError = error instanceof Error ? error.message : String(error);
+    }
+
+    results[storeDoc.id] = storeResult;
   }
 
-  try {
-    result.products = await pullPriceStockFromDaraz();
-  } catch (error) {
-    result.productsError = error instanceof Error ? error.message : String(error);
-  }
-
-  res.json(result);
+  res.json({ stores: results });
 });
 
 export default router;

@@ -97,6 +97,18 @@ export interface DarazCategoryNode {
   children: DarazCategoryNode[];
 }
 
+export interface Store {
+  id: string;
+  name: string;
+  country: string;
+  countryLabel: string;
+  sellerId: string | null;
+  connectedAt: string;
+  isCurrent: boolean;
+  productCount: number;
+  orderCount: number;
+}
+
 export interface DarazExistingProduct {
   item_id: string;
   primary_category: string;

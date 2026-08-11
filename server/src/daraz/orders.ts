@@ -10,10 +10,10 @@ export interface ImportOrdersResult {
 }
 
 // Pulls orders from Daraz into this app's own DB for viewing - read-only,
-// nothing is pushed anywhere else from here. Doc id = Daraz's own order id,
+// nothing is pushed anywhere else from here. Doc id = `${storeId}_${darazOrderId}`,
 // so this is a plain upsert-by-id.
-export async function importDarazOrders(): Promise<ImportOrdersResult> {
-  const darazSession = await getValidAccessToken();
+export async function importDarazOrders(storeId: string): Promise<ImportOrdersResult> {
+  const darazSession = await getValidAccessToken(storeId);
   if (!darazSession) {
     throw new Error("No connected Daraz account");
   }
@@ -29,7 +29,7 @@ export async function importDarazOrders(): Promise<ImportOrdersResult> {
 
   for (const order of orders) {
     const items = await getOrderItems(darazOpts, order.orderId);
-    const docRef = ordersCol.doc(order.orderId);
+    const docRef = ordersCol.doc(`${storeId}_${order.orderId}`);
     const existing = await docRef.get();
     const now = Timestamp.now();
 
@@ -45,6 +45,7 @@ export async function importDarazOrders(): Promise<ImportOrdersResult> {
     }));
 
     const fields = {
+      storeId,
       darazOrderId: order.orderId,
       orderNumber: order.orderNumber ?? null,
       customerName: order.customerName ?? null,

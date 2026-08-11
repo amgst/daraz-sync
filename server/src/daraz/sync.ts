@@ -35,12 +35,13 @@ async function uploadProductImages(
 // it on Daraz. Throws on any failure - callers are responsible for
 // persisting status.
 export async function syncProduct(
+  storeId: string,
   productId: string,
   type: "create" | "update" | "price_qty",
 ): Promise<void> {
   const docRef = productsCol.doc(productId);
   const snap = await docRef.get();
-  if (!snap.exists) {
+  if (!snap.exists || (snap.data() as ProductDoc).storeId !== storeId) {
     throw new Error(`Product ${productId} not found`);
   }
   const product = snap.data() as ProductDoc;
@@ -52,7 +53,7 @@ export async function syncProduct(
     );
   }
 
-  const darazSession = await getValidAccessToken();
+  const darazSession = await getValidAccessToken(storeId);
   if (!darazSession) {
     throw new Error("No connected Daraz account");
   }
@@ -184,9 +185,9 @@ export interface ImportResult {
 
 // Creates a brand-new local product from a Daraz listing that has no local
 // counterpart yet - the reverse of syncProduct.
-export async function importDarazProduct(darazItemId: string): Promise<ImportResult> {
+export async function importDarazProduct(storeId: string, darazItemId: string): Promise<ImportResult> {
   const warnings: string[] = [];
-  const darazSession = await getValidAccessToken();
+  const darazSession = await getValidAccessToken(storeId);
   if (!darazSession) {
     throw new Error("No connected Daraz account");
   }
@@ -204,6 +205,7 @@ export async function importDarazProduct(darazItemId: string): Promise<ImportRes
   const now = Timestamp.now();
   const docRef = productsCol.doc();
   const data: ProductDoc = {
+    storeId,
     title: detail.name,
     descriptionHtml: detail.description ?? null,
     vendor: detail.brand ?? null,
@@ -250,8 +252,8 @@ export interface ImportAllResult {
 // Idempotent (matches on darazItemId), so it's safe to re-run if it gets cut
 // off partway (e.g. a serverless function timeout on a large catalog) - it
 // picks up where it left off instead of duplicating.
-export async function importAllDarazProducts(): Promise<ImportAllResult> {
-  const darazSession = await getValidAccessToken();
+export async function importAllDarazProducts(storeId: string): Promise<ImportAllResult> {
+  const darazSession = await getValidAccessToken(storeId);
   if (!darazSession) {
     throw new Error("No connected Daraz account");
   }
@@ -260,7 +262,7 @@ export async function importAllDarazProducts(): Promise<ImportAllResult> {
     country: darazSession.country,
   };
 
-  const existingSnap = await productsCol.get();
+  const existingSnap = await productsCol.where("storeId", "==", storeId).get();
   const linkedItemIds = new Set(
     existingSnap.docs
       .map((d) => (d.data() as ProductDoc).darazItemId)
@@ -281,7 +283,7 @@ export async function importAllDarazProducts(): Promise<ImportAllResult> {
         continue;
       }
       try {
-        await importDarazProduct(item.item_id);
+        await importDarazProduct(storeId, item.item_id);
         linkedItemIds.add(item.item_id);
         result.imported++;
       } catch (error) {
@@ -308,8 +310,8 @@ export interface PullResult {
 // always win here, since price/stock is often adjusted directly in Daraz's
 // seller tools. Matches by SellerSku, which both import and sync use as the
 // variant's sku field.
-export async function pullPriceStockFromDaraz(): Promise<PullResult> {
-  const darazSession = await getValidAccessToken();
+export async function pullPriceStockFromDaraz(storeId: string): Promise<PullResult> {
+  const darazSession = await getValidAccessToken(storeId);
   if (!darazSession) {
     throw new Error("No connected Daraz account");
   }
@@ -318,7 +320,7 @@ export async function pullPriceStockFromDaraz(): Promise<PullResult> {
     country: darazSession.country,
   };
 
-  const snap = await productsCol.get();
+  const snap = await productsCol.where("storeId", "==", storeId).get();
   const products = snap.docs.filter((d) => (d.data() as ProductDoc).darazItemId);
 
   const result: PullResult = { productsChecked: 0, productsUpdated: 0, errors: [] };

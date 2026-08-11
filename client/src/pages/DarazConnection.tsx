@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useToast } from "../ToastContext";
+import { useStores } from "../StoreContext";
 
 const COUNTRY_OPTIONS = [
   { value: "PK", label: "Pakistan" },
@@ -13,6 +14,8 @@ const COUNTRY_OPTIONS = [
 
 interface Status {
   connected: boolean;
+  storeId?: string;
+  name?: string;
   country?: string;
   countryLabel?: string;
   sellerId?: string | null;
@@ -28,6 +31,7 @@ export default function DarazConnection() {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
+  const { currentStoreId, refresh: refreshStores } = useStores();
 
   const load = () => api.get<Status>("/daraz/status").then(setStatus);
 
@@ -59,11 +63,12 @@ export default function DarazConnection() {
   };
 
   const disconnect = async () => {
+    if (!currentStoreId) return;
     setDisconnecting(true);
     try {
-      await api.post("/daraz/disconnect");
+      await api.delete(`/stores/${currentStoreId}`);
       toast.show("Daraz account disconnected");
-      await load();
+      await Promise.all([load(), refreshStores()]);
     } finally {
       setDisconnecting(false);
     }
@@ -86,6 +91,7 @@ export default function DarazConnection() {
       <div className="page-header">
         <div>
           <h1>Daraz connection</h1>
+          {status.connected && <div className="subtitle">Store: {status.name}</div>}
         </div>
       </div>
 

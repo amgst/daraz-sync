@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { Timestamp } from "firebase-admin/firestore";
-import { requireAuth } from "../authMiddleware.js";
+import { requireAuth, requireStore } from "../authMiddleware.js";
 import { syncProduct, importDarazProduct, importAllDarazProducts, pullPriceStockFromDaraz } from "../daraz/sync.js";
 import { getValidAccessToken } from "../daraz/tokens.js";
 import {
@@ -10,27 +10,41 @@ import {
   RESERVED_ATTRIBUTE_KEYS,
   SKU_DIMENSION_FIELDS,
 } from "../daraz/client.js";
-import { productsCol, accountRef, serializeProduct, type ProductDoc, type DarazAccountDoc, type VariantDoc } from "../daraz/models.js";
+import { productsCol, storesCol, serializeProduct, type ProductDoc, type StoreDoc, type VariantDoc } from "../daraz/models.js";
 import { generateProductDraft } from "../ai/generateProduct.js";
 
 const router = Router();
 router.use(requireAuth);
+router.use(requireStore);
 
 // Kept in sync with sync.ts's autoMirrorSources - these get derived from
 // Title/Description/Highlights automatically, so they're excluded from the
 // suggested-attributes list rather than making the user fill in duplicates.
 const AUTO_MIRRORED_ATTRIBUTE_KEYS = new Set(["name_en", "description_en", "short_description", "short_description_en"]);
 
-// There's only one Daraz account connection for this app - fetched here
-// (rather than baked into serializeProduct) so callers that don't need the
-// storefront link can skip the extra read.
-async function connectedCountry(): Promise<string | null> {
-  const snap = await accountRef.get();
-  return snap.exists ? (snap.data() as DarazAccountDoc).country : null;
+// Fetched here (rather than baked into serializeProduct) so callers that
+// don't need the storefront link can skip the extra read.
+async function connectedCountry(storeId: string): Promise<string | null> {
+  const snap = await storesCol.doc(storeId).get();
+  return snap.exists ? (snap.data() as StoreDoc).country : null;
 }
 
-router.get("/", async (_req, res) => {
-  const [snap, country] = await Promise.all([productsCol.orderBy("updatedAt", "desc").get(), connectedCountry()]);
+// Products from other stores must 404, not just be filtered out of lists -
+// otherwise a product id from store A would still be readable/editable
+// while store B is selected.
+async function ownedProduct(storeId: string, productId: string) {
+  const ref = productsCol.doc(productId);
+  const snap = await ref.get();
+  if (!snap.exists || (snap.data() as ProductDoc).storeId !== storeId) return null;
+  return { ref, snap };
+}
+
+router.get("/", async (req, res) => {
+  const storeId = req.session!.currentStoreId!;
+  const [snap, country] = await Promise.all([
+    productsCol.where("storeId", "==", storeId).orderBy("updatedAt", "desc").get(),
+    connectedCountry(storeId),
+  ]);
   res.json({ products: snap.docs.map((d) => serializeProduct(d.id, d.data() as ProductDoc, country)) });
 });
 
@@ -61,6 +75,7 @@ router.post("/", async (req, res) => {
   const now = Timestamp.now();
   const docRef = productsCol.doc();
   const data: ProductDoc = {
+    storeId: req.session!.currentStoreId!,
     title,
     descriptionHtml: descriptionHtml ?? null,
     vendor: vendor ?? null,
@@ -110,12 +125,13 @@ router.post("/generate", async (req, res) => {
 });
 
 router.get("/:id", async (req, res) => {
-  const [snap, country] = await Promise.all([productsCol.doc(req.params.id).get(), connectedCountry()]);
-  if (!snap.exists) {
+  const storeId = req.session!.currentStoreId!;
+  const [owned, country] = await Promise.all([ownedProduct(storeId, req.params.id), connectedCountry(storeId)]);
+  if (!owned) {
     res.status(404).json({ error: "Product not found" });
     return;
   }
-  res.json({ product: serializeProduct(snap.id, snap.data() as ProductDoc, country) });
+  res.json({ product: serializeProduct(owned.snap.id, owned.snap.data() as ProductDoc, country) });
 });
 
 router.put("/:id", async (req, res) => {
@@ -138,12 +154,12 @@ router.put("/:id", async (req, res) => {
     }>;
   };
 
-  const docRef = productsCol.doc(req.params.id);
-  const existing = await docRef.get();
-  if (!existing.exists) {
+  const owned = await ownedProduct(req.session!.currentStoreId!, req.params.id);
+  if (!owned) {
     res.status(404).json({ error: "Product not found" });
     return;
   }
+  const docRef = owned.ref;
 
   const update: Record<string, unknown> = { updatedAt: Timestamp.now() };
   if (title !== undefined) update.title = title;
@@ -177,7 +193,12 @@ router.put("/:id", async (req, res) => {
 });
 
 router.delete("/:id", async (req, res) => {
-  await productsCol.doc(req.params.id).delete();
+  const owned = await ownedProduct(req.session!.currentStoreId!, req.params.id);
+  if (!owned) {
+    res.status(404).json({ error: "Product not found" });
+    return;
+  }
+  await owned.ref.delete();
   res.json({ ok: true });
 });
 
@@ -188,7 +209,12 @@ router.put("/:id/mapping", async (req, res) => {
     attributes: Record<string, string>;
   };
 
-  const docRef = productsCol.doc(req.params.id);
+  const owned = await ownedProduct(req.session!.currentStoreId!, req.params.id);
+  if (!owned) {
+    res.status(404).json({ error: "Product not found" });
+    return;
+  }
+  const docRef = owned.ref;
   await docRef.update({
     darazCategoryId: categoryId,
     attributesJson: JSON.stringify(attributes ?? {}),
@@ -210,7 +236,12 @@ router.post("/:id/link", async (req, res) => {
     darazSkuId?: string;
   };
 
-  const docRef = productsCol.doc(req.params.id);
+  const owned = await ownedProduct(req.session!.currentStoreId!, req.params.id);
+  if (!owned) {
+    res.status(404).json({ error: "Product not found" });
+    return;
+  }
+  const docRef = owned.ref;
   await docRef.update({
     darazItemId,
     darazCategoryId: darazCategoryId ?? null,
@@ -226,10 +257,15 @@ router.post("/:id/link", async (req, res) => {
 });
 
 router.post("/:id/sync", async (req, res) => {
+  const storeId = req.session!.currentStoreId!;
   try {
-    const existing = await productsCol.doc(req.params.id).get();
-    const product = existing.data() as ProductDoc | undefined;
-    await syncProduct(req.params.id, product?.darazItemId ? "update" : "create");
+    const owned = await ownedProduct(storeId, req.params.id);
+    if (!owned) {
+      res.status(404).json({ ok: false, error: "Product not found" });
+      return;
+    }
+    const product = owned.snap.data() as ProductDoc;
+    await syncProduct(storeId, req.params.id, product.darazItemId ? "update" : "create");
     res.json({ ok: true });
   } catch (error) {
     res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -243,7 +279,7 @@ router.get("/:id/suggested-attributes", async (req, res) => {
     return;
   }
   try {
-    const session = await getValidAccessToken();
+    const session = await getValidAccessToken(req.session!.currentStoreId!);
     if (!session) {
       res.json({ suggestions: [], requiredSkuFields: [] });
       return;
@@ -284,7 +320,7 @@ router.get("/search/daraz", async (req, res) => {
     return;
   }
   try {
-    const session = await getValidAccessToken();
+    const session = await getValidAccessToken(req.session!.currentStoreId!);
     if (!session) {
       res.status(400).json({ error: "Not connected to Daraz" });
       return;
@@ -302,25 +338,25 @@ router.get("/search/daraz", async (req, res) => {
 router.post("/import", async (req, res) => {
   const { darazItemId } = req.body as { darazItemId: string };
   try {
-    const result = await importDarazProduct(darazItemId);
+    const result = await importDarazProduct(req.session!.currentStoreId!, darazItemId);
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 
-router.post("/import-all", async (_req, res) => {
+router.post("/import-all", async (req, res) => {
   try {
-    const result = await importAllDarazProducts();
+    const result = await importAllDarazProducts(req.session!.currentStoreId!);
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 
-router.post("/pull-from-daraz", async (_req, res) => {
+router.post("/pull-from-daraz", async (req, res) => {
   try {
-    const result = await pullPriceStockFromDaraz();
+    const result = await pullPriceStockFromDaraz(req.session!.currentStoreId!);
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });

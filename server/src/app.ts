@@ -7,6 +7,7 @@ import cookieSession from "cookie-session";
 
 import authRoutes from "./routes/auth.js";
 import darazRoutes from "./routes/daraz.js";
+import storesRoutes from "./routes/stores.js";
 import productsRoutes from "./routes/products.js";
 import ordersRoutes from "./routes/orders.js";
 import cronRoutes from "./routes/cron.js";
@@ -47,6 +48,7 @@ app.use(
 
 app.use("/api/auth", authRoutes);
 app.use("/api/daraz", darazRoutes);
+app.use("/api/stores", storesRoutes);
 app.use("/api/products", productsRoutes);
 app.use("/api/orders", ordersRoutes);
 app.use("/api/cron", cronRoutes);

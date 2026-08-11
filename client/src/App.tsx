@@ -1,10 +1,12 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { ToastProvider } from "./ToastContext";
+import { StoreProvider } from "./StoreContext";
 import Layout from "./pages/Layout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import DarazConnection from "./pages/DarazConnection";
+import Stores from "./pages/Stores";
 import Products from "./pages/Products";
 import ProductForm from "./pages/ProductForm";
 import Orders from "./pages/Orders";
@@ -30,12 +32,15 @@ function AppRoutes() {
         path="/"
         element={
           <Protected>
-            <Layout />
+            <StoreProvider>
+              <Layout />
+            </StoreProvider>
           </Protected>
         }
       >
         <Route index element={<Dashboard />} />
         <Route path="daraz" element={<DarazConnection />} />
+        <Route path="stores" element={<Stores />} />
         <Route path="products" element={<Products />} />
         <Route path="products/new" element={<ProductForm />} />
         <Route path="products/:id" element={<ProductForm />} />

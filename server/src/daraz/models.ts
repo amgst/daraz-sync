@@ -8,20 +8,24 @@ function toIso(value: Timestamp | null | undefined): string | null {
 
 export type SyncStatus = "unmapped" | "pending" | "synced" | "error";
 
-// --- Daraz account (singleton doc, one Daraz seller connection per app instance) ---
+// --- Stores (one doc per connected Daraz seller account - this app supports
+// several stores under one shared login, switched via the session's
+// currentStoreId) ---
 
-export interface DarazAccountDoc {
+export interface StoreDoc {
+  name: string;
   country: string;
   sellerId: string | null;
   accessTokenEnc: string;
   refreshTokenEnc: string;
   tokenExpiresAt: Timestamp;
   refreshTokenExpiresAt: Timestamp;
+  createdAt: Timestamp;
   connectedAt: Timestamp;
   updatedAt: Timestamp;
 }
 
-export const accountRef = db.collection("darazAccounts").doc("singleton");
+export const storesCol = db.collection("stores");
 
 // --- Products (variants embedded - always read/written together with the product) ---
 
@@ -38,6 +42,7 @@ export interface VariantDoc {
 }
 
 export interface ProductDoc {
+  storeId: string;
   title: string;
   descriptionHtml: string | null;
   vendor: string | null;
@@ -59,10 +64,10 @@ export interface ProductDoc {
 
 export const productsCol = db.collection("products");
 
-// `country` is the connected Daraz account's country/site (there's only one
-// account for this app) - needed to build the storefront link since each
-// site has its own domain. Omitted (null darazUrl) where the caller hasn't
-// looked up the account, e.g. contexts that don't need the link.
+// `country` is the owning store's country/site - needed to build the
+// storefront link since each site has its own domain. Omitted (null
+// darazUrl) where the caller hasn't looked up the store, e.g. contexts that
+// don't need the link.
 export function serializeProduct(id: string, data: ProductDoc, country?: string | null) {
   return {
     id,
@@ -85,8 +90,9 @@ export function serializeProduct(id: string, data: ProductDoc, country?: string 
   };
 }
 
-// --- Daraz orders (items embedded; doc id = Daraz's own order id, so
-// import is a plain upsert-by-id with no separate uniqueness lookup) ---
+// --- Daraz orders (items embedded; doc id = `${storeId}_${darazOrderId}` so
+// two stores' orders can never collide, so import is still a plain
+// upsert-by-id with no separate uniqueness lookup) ---
 
 export interface OrderItemDoc {
   id: string;
@@ -100,6 +106,7 @@ export interface OrderItemDoc {
 }
 
 export interface OrderDoc {
+  storeId: string;
   darazOrderId: string;
   orderNumber: string | null;
   customerName: string | null;

@@ -13,9 +13,11 @@ function getSecret(): string {
   return secret;
 }
 
-export function createState(country: string): string {
+// `storeId`, when present, means "reconnect/refresh this existing store"
+// rather than "connect a brand-new store" - the callback branches on it.
+export function createState(country: string, storeId?: string): string {
   const nonce = crypto.randomBytes(8).toString("hex");
-  const payload = `${country}:${nonce}:${Date.now()}`;
+  const payload = `${country}:${storeId ?? ""}:${nonce}:${Date.now()}`;
   const signature = crypto
     .createHmac("sha256", getSecret())
     .update(payload)
@@ -25,7 +27,7 @@ export function createState(country: string): string {
 
 const MAX_STATE_AGE_MS = 10 * 60 * 1000; // 10 minutes to complete the OAuth redirect
 
-export function verifyState(state: string): { country: string } | null {
+export function verifyState(state: string): { country: string; storeId: string | null } | null {
   let decoded: string;
   try {
     decoded = Buffer.from(state, "base64url").toString("utf8");
@@ -33,9 +35,9 @@ export function verifyState(state: string): { country: string } | null {
     return null;
   }
   const parts = decoded.split(":");
-  if (parts.length !== 4) return null;
-  const [country, nonce, timestampStr, signature] = parts;
-  const payload = `${country}:${nonce}:${timestampStr}`;
+  if (parts.length !== 5) return null;
+  const [country, storeId, nonce, timestampStr, signature] = parts;
+  const payload = `${country}:${storeId}:${nonce}:${timestampStr}`;
   const expected = crypto
     .createHmac("sha256", getSecret())
     .update(payload)
@@ -50,5 +52,5 @@ export function verifyState(state: string): { country: string } | null {
     return null;
   }
 
-  return { country };
+  return { country, storeId: storeId || null };
 }
