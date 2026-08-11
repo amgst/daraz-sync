@@ -4,6 +4,7 @@ import { ToastProvider } from "./ToastContext";
 import { StoreProvider } from "./StoreContext";
 import Layout from "./pages/Layout";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import DarazConnection from "./pages/DarazConnection";
 import Stores from "./pages/Stores";
@@ -19,6 +20,12 @@ function Protected({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const { role } = useAuth();
+  if (role !== "admin") return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 function AppRoutes() {
   const { loggedIn } = useAuth();
 
@@ -27,6 +34,10 @@ function AppRoutes() {
       <Route
         path="/login"
         element={loggedIn ? <Navigate to="/" replace /> : <Login />}
+      />
+      <Route
+        path="/signup"
+        element={loggedIn ? <Navigate to="/" replace /> : <Signup />}
       />
       <Route
         path="/"
@@ -40,13 +51,23 @@ function AppRoutes() {
       >
         <Route index element={<Dashboard />} />
         <Route path="daraz" element={<DarazConnection />} />
-        <Route path="stores" element={<Stores />} />
+        <Route
+          path="stores"
+          element={
+            <RequireAdmin>
+              <Stores />
+            </RequireAdmin>
+          }
+        />
         <Route path="products" element={<Products />} />
         <Route path="products/new" element={<ProductForm />} />
         <Route path="products/:id" element={<ProductForm />} />
         <Route path="orders" element={<Orders />} />
         <Route path="orders/:id" element={<OrderDetail />} />
       </Route>
+      {/* Any unrecognized path (e.g. a broken external redirect) bounces
+          home instead of rendering a blank page. */}
+      <Route path="*" element={<Navigate to={loggedIn ? "/" : "/login"} replace />} />
     </Routes>
   );
 }

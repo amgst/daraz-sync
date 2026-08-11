@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 
-export default function Login() {
-  const { login } = useAuth();
-  const [username, setUsername] = useState("");
+export default function Signup() {
+  const { signup } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -14,9 +15,12 @@ export default function Login() {
     setBusy(true);
     setError(null);
     try {
-      await login(username, password);
+      await signup(email, password);
+      // No store connected yet - send them straight to the connect flow
+      // instead of an empty dashboard.
+      navigate("/daraz", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Sign up failed");
     } finally {
       setBusy(false);
     }
@@ -25,23 +29,26 @@ export default function Login() {
   return (
     <div className="login-shell">
       <form className="login-card" onSubmit={onSubmit}>
-        <h1>Daraz Sync</h1>
+        <h1>Create your account</h1>
         <div className="stack">
           <div className="field">
-            <label>Username or email</label>
-            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+            <label>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
           </div>
           <div className="field">
             <label>Password</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <p className="small subdued" style={{ marginTop: 4, marginBottom: 0 }}>
+              At least 8 characters.
+            </p>
           </div>
           <button className="primary" type="submit" disabled={busy}>
-            {busy ? "Logging in..." : "Log in"}
+            {busy ? "Creating account..." : "Sign up"}
           </button>
           {error && <div className="error-text">{error}</div>}
         </div>
         <p className="small subdued" style={{ textAlign: "center", marginTop: 14 }}>
-          Don't have a store account? <Link to="/signup">Sign up</Link>
+          Already have an account? <Link to="/login">Log in</Link>
         </p>
       </form>
     </div>

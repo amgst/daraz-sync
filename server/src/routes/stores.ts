@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../authMiddleware.js";
+import { requireAuth, requireAdmin, canManageStore } from "../authMiddleware.js";
 import { storesCol, productsCol, ordersCol, type StoreDoc } from "../daraz/models.js";
 import { isDarazCountry, DARAZ_SITES } from "../daraz/countries.js";
 
@@ -19,7 +19,10 @@ function serializeStore(id: string, data: StoreDoc, currentStoreId: string | und
 }
 
 router.get("/", async (req, res) => {
-  const snap = await storesCol.orderBy("createdAt", "asc").get();
+  const isAdmin = req.session?.role === "admin";
+  const snap = isAdmin
+    ? await storesCol.orderBy("createdAt", "asc").get()
+    : await storesCol.where("ownerUserId", "==", req.session!.userId).get();
   const stores = await Promise.all(
     snap.docs.map(async (doc) => {
       const [productCount, orderCount] = await Promise.all([
@@ -36,7 +39,8 @@ router.get("/", async (req, res) => {
   res.json({ stores, currentStoreId: req.session?.currentStoreId ?? null });
 });
 
-router.post("/:id/select", async (req, res) => {
+// Admin-only: customers only ever have one store, auto-selected on login.
+router.post("/:id/select", requireAdmin, async (req, res) => {
   const snap = await storesCol.doc(req.params.id).get();
   if (!snap.exists) {
     res.status(404).json({ error: "Store not found" });
@@ -58,12 +62,26 @@ router.put("/:id", async (req, res) => {
     res.status(404).json({ error: "Store not found" });
     return;
   }
+  if (!canManageStore(req, (snap.data() as StoreDoc).ownerUserId)) {
+    res.status(403).json({ error: "Not authorized" });
+    return;
+  }
   await ref.update({ name: name.trim() });
   res.json({ ok: true });
 });
 
 router.delete("/:id", async (req, res) => {
-  await storesCol.doc(req.params.id).delete();
+  const ref = storesCol.doc(req.params.id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    res.status(404).json({ error: "Store not found" });
+    return;
+  }
+  if (!canManageStore(req, (snap.data() as StoreDoc).ownerUserId)) {
+    res.status(403).json({ error: "Not authorized" });
+    return;
+  }
+  await ref.delete();
   if (req.session?.currentStoreId === req.params.id) {
     delete req.session.currentStoreId;
   }

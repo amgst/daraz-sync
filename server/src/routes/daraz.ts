@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { Timestamp } from "firebase-admin/firestore";
-import { requireAuth, requireStore } from "../authMiddleware.js";
+import { requireAuth, requireStore, canManageStore } from "../authMiddleware.js";
 import { createState, verifyState } from "../daraz/state.js";
 import { getAuthorizeUrl, exchangeCodeForToken, getCategoryTree } from "../daraz/client.js";
 import { encrypt } from "../daraz/crypto.js";
@@ -40,11 +40,18 @@ router.get("/status", requireAuth, async (req, res) => {
 // Starts the OAuth flow for a brand-new store - returns the Daraz authorize
 // URL for the browser to navigate to (top-level navigation; Daraz's login
 // page can't be embedded).
-router.post("/connect", requireAuth, (req, res) => {
+router.post("/connect", requireAuth, async (req, res) => {
   const { country } = req.body as { country?: string };
   if (!country || !isDarazCountry(country)) {
     res.status(400).json({ error: "Choose a valid Daraz country/site" });
     return;
+  }
+  if (req.session?.role === "customer") {
+    const owned = await storesCol.where("ownerUserId", "==", req.session.userId).limit(1).get();
+    if (!owned.empty) {
+      res.status(400).json({ error: "You already have a connected store - use Reconnect instead." });
+      return;
+    }
   }
   const state = createState(country);
   res.json({ authorizeUrl: getAuthorizeUrl(state, country) });
@@ -60,6 +67,10 @@ router.post("/:id/reconnect", requireAuth, async (req, res) => {
     return;
   }
   const store = snap.data() as StoreDoc;
+  if (!canManageStore(req, store.ownerUserId)) {
+    res.status(403).json({ error: "Not authorized to reconnect this store" });
+    return;
+  }
   const state = createState(store.country, req.params.id);
   res.json({ authorizeUrl: getAuthorizeUrl(state, store.country) });
 });
@@ -99,6 +110,12 @@ router.get("/callback", async (req, res) => {
       const ref = storesCol.doc(verified.storeId);
       const existing = await ref.get();
       if (!existing.exists) throw new Error("Store no longer exists");
+      // Defense in depth: the signed state is only ever issued after the
+      // /:id/reconnect ownership check, but re-verify here too since this
+      // callback is the one place that actually writes the new tokens.
+      if (!canManageStore(req, (existing.data() as StoreDoc).ownerUserId)) {
+        throw new Error("Not authorized to reconnect this store");
+      }
       await ref.update(tokenFields);
       storeId = verified.storeId;
     } else {
@@ -108,6 +125,7 @@ router.get("/callback", async (req, res) => {
       const data: StoreDoc = {
         ...tokenFields,
         name: `${countryLabel} Store`,
+        ownerUserId: req.session?.role === "customer" ? req.session.userId ?? null : null,
         createdAt: now,
         connectedAt: now,
       };
@@ -117,10 +135,16 @@ router.get("/callback", async (req, res) => {
 
     if (req.session) req.session.currentStoreId = storeId;
 
-    res.redirect(`${process.env.CLIENT_URL}/daraz?connected=1`);
+    // CLIENT_URL is unset in some deployments (e.g. client+server sharing
+    // one Vercel domain) - falling back to "" makes this an absolute-path
+    // redirect (same origin) instead of a broken relative one (an unset env
+    // var would otherwise literally interpolate as the string "undefined").
+    const clientUrl = process.env.CLIENT_URL ?? "";
+    res.redirect(`${clientUrl}/daraz?connected=1`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    res.redirect(`${process.env.CLIENT_URL}/daraz?error=${encodeURIComponent(message)}`);
+    const clientUrl = process.env.CLIENT_URL ?? "";
+    res.redirect(`${clientUrl}/daraz?error=${encodeURIComponent(message)}`);
   }
 });
 

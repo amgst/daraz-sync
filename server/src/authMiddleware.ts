@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
 
 export interface SessionData {
-  loggedIn?: boolean;
+  role?: "admin" | "customer";
+  userId?: string; // only set when role === "customer"
   currentStoreId?: string;
 }
 
@@ -17,11 +18,19 @@ declare global {
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (req.session?.loggedIn) {
+  if (req.session?.role) {
     next();
     return;
   }
   res.status(401).json({ error: "Not authenticated" });
+}
+
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (req.session?.role === "admin") {
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Admin access required" });
 }
 
 // For routes that operate on "the current store" (products, orders, sync) -
@@ -33,4 +42,12 @@ export function requireStore(req: Request, res: Response, next: NextFunction) {
     return;
   }
   res.status(400).json({ error: "No store selected" });
+}
+
+// True for an admin (can manage any store) or a customer who owns this
+// specific store. Shared by routes/stores.ts and routes/daraz.ts so a
+// customer can't rename/disconnect/reconnect another customer's store.
+export function canManageStore(req: Request, ownerUserId: string | null): boolean {
+  if (req.session?.role === "admin") return true;
+  return req.session?.role === "customer" && ownerUserId === req.session.userId;
 }

@@ -14,6 +14,9 @@ export type SyncStatus = "unmapped" | "pending" | "synced" | "error";
 
 export interface StoreDoc {
   name: string;
+  // null = admin-owned / no individual customer owner (e.g. stores that
+  // existed before per-customer ownership was introduced).
+  ownerUserId: string | null;
   country: string;
   sellerId: string | null;
   accessTokenEnc: string;

@@ -25,11 +25,12 @@ async function main() {
     return;
   }
 
-  const account = singletonSnap.data() as Omit<StoreDoc, "name" | "createdAt">;
+  const account = singletonSnap.data() as Omit<StoreDoc, "name" | "createdAt" | "ownerUserId">;
   const now = Timestamp.now();
   const storeData: StoreDoc = {
     ...account,
     name: storeName,
+    ownerUserId: null,
     createdAt: account.connectedAt ?? now,
   };
 
