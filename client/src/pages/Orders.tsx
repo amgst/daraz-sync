@@ -17,7 +17,14 @@ export default function Orders() {
   const [importing, setImporting] = useState(false);
   const toast = useToast();
 
-  const load = () => api.get<{ orders: DarazOrder[] }>("/orders").then((r) => setOrders(r.orders));
+  const load = () =>
+    api
+      .get<{ orders: DarazOrder[] }>("/orders")
+      .then((r) => setOrders(r.orders))
+      .catch((err) => {
+        toast.show(err instanceof Error ? err.message : "Failed to load orders", { isError: true });
+        setOrders([]);
+      });
 
   useEffect(() => {
     load();

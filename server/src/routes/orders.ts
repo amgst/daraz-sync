@@ -12,35 +12,39 @@ router.get("/", async (req, res) => {
   const status = String(req.query.status ?? "");
   const q = String(req.query.q ?? "").trim().toLowerCase();
 
-  const snap = await ordersCol.where("storeId", "==", storeId).get();
-  let docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as OrderDoc }));
+  try {
+    const snap = await ordersCol.where("storeId", "==", storeId).get();
+    let docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as OrderDoc }));
 
-  if (status) {
-    docs = docs.filter((o) => o.data.status === status);
-  }
-  if (q) {
-    docs = docs.filter(
-      (o) =>
-        (o.data.orderNumber ?? "").toLowerCase().includes(q) ||
-        o.data.darazOrderId.toLowerCase().includes(q) ||
-        (o.data.customerName ?? "").toLowerCase().includes(q),
-    );
-  }
-
-  docs.sort((a, b) => {
-    const aCreated = a.data.darazCreatedAt?.toMillis();
-    const bCreated = b.data.darazCreatedAt?.toMillis();
-    if (aCreated !== bCreated) {
-      if (aCreated === undefined) return 1;
-      if (bCreated === undefined) return -1;
-      return bCreated - aCreated;
+    if (status) {
+      docs = docs.filter((o) => o.data.status === status);
     }
-    return b.data.importedAt.toMillis() - a.data.importedAt.toMillis();
-  });
+    if (q) {
+      docs = docs.filter(
+        (o) =>
+          (o.data.orderNumber ?? "").toLowerCase().includes(q) ||
+          o.data.darazOrderId.toLowerCase().includes(q) ||
+          (o.data.customerName ?? "").toLowerCase().includes(q),
+      );
+    }
 
-  const statuses = Array.from(new Set(snap.docs.map((d) => (d.data() as OrderDoc).status))).sort();
+    docs.sort((a, b) => {
+      const aCreated = a.data.darazCreatedAt?.toMillis();
+      const bCreated = b.data.darazCreatedAt?.toMillis();
+      if (aCreated !== bCreated) {
+        if (aCreated === undefined) return 1;
+        if (bCreated === undefined) return -1;
+        return bCreated - aCreated;
+      }
+      return b.data.importedAt.toMillis() - a.data.importedAt.toMillis();
+    });
 
-  res.json({ orders: docs.map((o) => serializeOrder(o.id, o.data)), statuses });
+    const statuses = Array.from(new Set(snap.docs.map((d) => (d.data() as OrderDoc).status))).sort();
+
+    res.json({ orders: docs.map((o) => serializeOrder(o.id, o.data)), statuses });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 router.get("/:id", async (req, res) => {

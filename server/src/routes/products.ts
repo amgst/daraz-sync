@@ -41,11 +41,15 @@ async function ownedProduct(storeId: string, productId: string) {
 
 router.get("/", async (req, res) => {
   const storeId = req.session!.currentStoreId!;
-  const [snap, country] = await Promise.all([
-    productsCol.where("storeId", "==", storeId).orderBy("updatedAt", "desc").get(),
-    connectedCountry(storeId),
-  ]);
-  res.json({ products: snap.docs.map((d) => serializeProduct(d.id, d.data() as ProductDoc, country)) });
+  try {
+    const [snap, country] = await Promise.all([
+      productsCol.where("storeId", "==", storeId).orderBy("updatedAt", "desc").get(),
+      connectedCountry(storeId),
+    ]);
+    res.json({ products: snap.docs.map((d) => serializeProduct(d.id, d.data() as ProductDoc, country)) });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 router.post("/", async (req, res) => {

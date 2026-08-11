@@ -35,7 +35,14 @@ export default function Products() {
     localStorage.setItem("products-view", next);
   };
 
-  const load = () => api.get<{ products: Product[] }>("/products").then((r) => setProducts(r.products));
+  const load = () =>
+    api
+      .get<{ products: Product[] }>("/products")
+      .then((r) => setProducts(r.products))
+      .catch((err) => {
+        toast.show(err instanceof Error ? err.message : "Failed to load products", { isError: true });
+        setProducts([]);
+      });
 
   const deleteProduct = async (p: Product) => {
     const warning = p.darazItemId
