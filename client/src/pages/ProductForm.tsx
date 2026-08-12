@@ -62,6 +62,7 @@ export default function ProductForm() {
     Array<{ key: string; value: string; mandatory?: boolean; options?: string[]; skuLevel?: boolean }>
   >([]);
   const [requiredSkuFields, setRequiredSkuFields] = useState<string[]>([]);
+  const [loadingAttrs, setLoadingAttrs] = useState(false);
   const [busyMapping, setBusyMapping] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
 
@@ -173,37 +174,60 @@ export default function ProductForm() {
   const updateAttrRow = (i: number, field: "key" | "value", value: string) =>
     setAttrPairs((prev) => prev.map((p, idx) => (idx === i ? { ...p, [field]: value } : p)));
 
-  const loadSuggestedAttributes = async () => {
-    if (!id) return;
-    const res = await api.get<{
-      suggestions: Array<{ name: string; label: string; mandatory: boolean; options?: string[]; skuLevel: boolean }>;
-      requiredSkuFields: string[];
-    }>(`/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(categoryId)}`);
-    setRequiredSkuFields(res.requiredSkuFields);
-    // name_en/description_en/short_description(_en) don't show up here at
-    // all - the server derives them from Title/Description/Highlights
-    // automatically (see sync.ts's autoMirrorSources), so there's nothing
-    // to prompt the user to fill in for those.
-    const existingKeys = new Set(attrPairs.map((p) => p.key));
-    const newPairs = res.suggestions
-      .filter((a) => !existingKeys.has(a.name))
-      .map((a) => ({
-        key: a.name,
-        value: "",
-        mandatory: a.mandatory,
-        options: a.options,
-        skuLevel: a.skuLevel,
-      }));
-    if (newPairs.length === 0) {
-      toast.show("No attribute suggestions available - add manually");
-    } else {
-      setAttrPairs((prev) => [...prev, ...newPairs]);
-      const mandatoryCount = newPairs.filter((p) => p.mandatory).length;
-      if (mandatoryCount > 0) {
-        toast.show(`${mandatoryCount} of the added attributes are required by Daraz for this category`);
+  // Fires automatically once a category is known (product load or category
+  // change) so attribute fields show up without a manual click; the button
+  // in the UI just re-runs the same thing on demand. Silent on failure since
+  // it can run unannounced in the background - the manual button is still
+  // there if a transient error needs a retry.
+  const loadSuggestedAttributes = async (forCategoryId: string) => {
+    if (!id || !forCategoryId) return;
+    setLoadingAttrs(true);
+    try {
+      const res = await api.get<{
+        suggestions: Array<{ name: string; label: string; mandatory: boolean; options?: string[]; skuLevel: boolean }>;
+        requiredSkuFields: string[];
+      }>(`/products/${id}/suggested-attributes?categoryId=${encodeURIComponent(forCategoryId)}`);
+      setRequiredSkuFields(res.requiredSkuFields);
+      // name_en/description_en/short_description(_en) don't show up here at
+      // all - the server derives them from Title/Description/Highlights
+      // automatically (see sync.ts's autoMirrorSources), so there's nothing
+      // to prompt the user to fill in for those.
+      const suggestionByKey = new Map(res.suggestions.map((a) => [a.name, a]));
+      let addedMandatory = 0;
+      setAttrPairs((prev) => {
+        // Already-saved rows (loaded from attributesJson) only had key/value -
+        // backfill their mandatory/options/skuLevel metadata too, otherwise
+        // they'd render as plain text inputs missing the *required marker.
+        const merged = prev.map((p) => {
+          const s = suggestionByKey.get(p.key);
+          return s ? { ...p, mandatory: s.mandatory, options: s.options, skuLevel: s.skuLevel } : p;
+        });
+        const existingKeys = new Set(prev.map((p) => p.key));
+        const newPairs = res.suggestions
+          .filter((a) => !existingKeys.has(a.name))
+          .map((a) => ({ key: a.name, value: "", mandatory: a.mandatory, options: a.options, skuLevel: a.skuLevel }));
+        addedMandatory = newPairs.filter((p) => p.mandatory).length;
+        return [...merged, ...newPairs];
+      });
+      if (addedMandatory > 0) {
+        toast.show(`${addedMandatory} of the added attributes are required by Daraz for this category`);
       }
+    } catch {
+      // Background auto-load failure stays silent; a manual retry via the
+      // button will surface via its own disabled/loading state.
+    } finally {
+      setLoadingAttrs(false);
     }
   };
+
+  useEffect(() => {
+    if (!categoryId) return;
+    loadSuggestedAttributes(categoryId);
+    // Deliberately keyed only on categoryId (and id, for when a fresh
+    // product finishes loading) - attrPairs changes on every keystroke and
+    // would otherwise refetch constantly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, categoryId]);
 
   // Fallback guesses for the rare mandatory attribute that's free text with
   // no Daraz-supplied options list; anything with a real options list below
@@ -510,13 +534,18 @@ export default function ProductForm() {
             <h2>Daraz category</h2>
             <CategoryPicker categoryId={categoryId} onChange={setCategoryId} />
             <div className="row" style={{ marginTop: 10 }}>
-              <button onClick={loadSuggestedAttributes} disabled={!categoryId}>
-                Load suggested attributes
+              <button onClick={() => loadSuggestedAttributes(categoryId)} disabled={!categoryId || loadingAttrs}>
+                {loadingAttrs ? "Loading..." : "Reload suggested attributes"}
               </button>
               <button onClick={fillTestData} disabled={!categoryId}>
                 Fill required fields with test data
               </button>
             </div>
+            {loadingAttrs && (
+              <p className="subdued small" style={{ marginTop: 6 }}>
+                Loading suggested attributes for this category...
+              </p>
+            )}
 
             <div className="divider" />
 
