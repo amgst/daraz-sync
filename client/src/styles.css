@@ -215,6 +215,8 @@ button.plain { border-color: transparent; background: transparent; color: var(--
 .product-card .actions { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
 .product-card .actions button { flex: 1; }
 
+.pagination { justify-content: center; margin: 20px 0 4px; }
+
 .subdued { color: var(--text-subdued); }
 .small { font-size: 12.5px; }
 .divider { height: 1px; background: var(--border); margin: 16px 0; }

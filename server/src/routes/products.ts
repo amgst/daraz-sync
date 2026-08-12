@@ -39,14 +39,27 @@ async function ownedProduct(storeId: string, productId: string) {
   return { ref, snap };
 }
 
+// Pagination is opt-in via ?pageSize= - callers that just want the full
+// list (e.g. the dashboard's counts) keep working unchanged.
 router.get("/", async (req, res) => {
   const storeId = req.session!.currentStoreId!;
+  const pageSizeParam = Number(req.query.pageSize);
+  const pageSize = req.query.pageSize && pageSizeParam > 0 ? Math.min(100, pageSizeParam) : null;
+  const page = Math.max(1, Number(req.query.page) || 1);
   try {
-    const [snap, country] = await Promise.all([
-      productsCol.where("storeId", "==", storeId).orderBy("updatedAt", "desc").get(),
+    const baseQuery = productsCol.where("storeId", "==", storeId).orderBy("updatedAt", "desc");
+    const listQuery = pageSize ? baseQuery.offset((page - 1) * pageSize).limit(pageSize) : baseQuery;
+    const [snap, country, total] = await Promise.all([
+      listQuery.get(),
       connectedCountry(storeId),
+      pageSize ? baseQuery.count().get().then((c) => c.data().count) : Promise.resolve(null),
     ]);
-    res.json({ products: snap.docs.map((d) => serializeProduct(d.id, d.data() as ProductDoc, country)) });
+    const products = snap.docs.map((d) => serializeProduct(d.id, d.data() as ProductDoc, country));
+    res.json(
+      pageSize && total !== null
+        ? { products, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) }
+        : { products },
+    );
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

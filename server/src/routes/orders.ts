@@ -7,10 +7,17 @@ const router = Router();
 router.use(requireAuth);
 router.use(requireStore);
 
+// Pagination is opt-in via ?pageSize= - callers that just want the full
+// list (e.g. the dashboard's counts) keep working unchanged. Sorting/filtering
+// happens in memory (fallback-chain sort, free-text search) so the page is
+// sliced out of that same in-memory list rather than pushed to Firestore.
 router.get("/", async (req, res) => {
   const storeId = req.session!.currentStoreId!;
   const status = String(req.query.status ?? "");
   const q = String(req.query.q ?? "").trim().toLowerCase();
+  const pageSizeParam = Number(req.query.pageSize);
+  const pageSize = req.query.pageSize && pageSizeParam > 0 ? Math.min(100, pageSizeParam) : null;
+  const page = Math.max(1, Number(req.query.page) || 1);
 
   try {
     const snap = await ordersCol.where("storeId", "==", storeId).get();
@@ -40,8 +47,15 @@ router.get("/", async (req, res) => {
     });
 
     const statuses = Array.from(new Set(snap.docs.map((d) => (d.data() as OrderDoc).status))).sort();
+    const total = docs.length;
+    const pageDocs = pageSize ? docs.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize) : docs;
+    const orders = pageDocs.map((o) => serializeOrder(o.id, o.data));
 
-    res.json({ orders: docs.map((o) => serializeOrder(o.id, o.data)), statuses });
+    res.json(
+      pageSize
+        ? { orders, statuses, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) }
+        : { orders, statuses },
+    );
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

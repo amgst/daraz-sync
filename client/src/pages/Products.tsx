@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Product } from "../api";
 import { useToast } from "../ToastContext";
+import Pagination from "../components/Pagination";
 
 type View = "list" | "grid";
+
+const PAGE_SIZE = 20;
 
 const PLACEHOLDER_IMAGE =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23f5f6f8'/%3E%3Cpath d='M18 40l9-11 7 8 6-7 10 12H18z' fill='%23d5d8de'/%3E%3Ccircle cx='24' cy='22' r='5' fill='%23d5d8de'/%3E%3C/svg%3E";
@@ -22,6 +25,8 @@ function ProductThumb({ src, alt }: { src?: string; alt: string }) {
 
 export default function Products() {
   const [products, setProducts] = useState<Product[] | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [pulling, setPulling] = useState(false);
   const [importingAll, setImportingAll] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -35,10 +40,14 @@ export default function Products() {
     localStorage.setItem("products-view", next);
   };
 
-  const load = () =>
+  const load = (targetPage = page) =>
     api
-      .get<{ products: Product[] }>("/products")
-      .then((r) => setProducts(r.products))
+      .get<{ products: Product[]; totalPages: number }>(`/products?page=${targetPage}&pageSize=${PAGE_SIZE}`)
+      .then((r) => {
+        setProducts(r.products);
+        setTotalPages(r.totalPages || 1);
+        setPage(targetPage);
+      })
       .catch((err) => {
         toast.show(err instanceof Error ? err.message : "Failed to load products", { isError: true });
         setProducts([]);
@@ -52,8 +61,10 @@ export default function Products() {
     setDeletingId(p.id);
     try {
       await api.delete(`/products/${p.id}`);
-      setProducts((prev) => prev?.filter((x) => x.id !== p.id) ?? null);
       toast.show("Product removed");
+      // If that was the last item on a page past the first, step back a page.
+      const isLastOnPage = (products?.length ?? 0) <= 1 && page > 1;
+      await load(isLastOnPage ? page - 1 : page);
     } catch (err) {
       toast.show(err instanceof Error ? err.message : "Delete failed", { isError: true });
     } finally {
@@ -62,7 +73,7 @@ export default function Products() {
   };
 
   useEffect(() => {
-    load();
+    load(1);
   }, []);
 
   const pullFromDaraz = async () => {
@@ -183,7 +194,7 @@ export default function Products() {
                     <Link to={`/products/${p.id}`}>
                       <button>{p.syncStatus === "unmapped" ? "Map category" : "Edit"}</button>
                     </Link>
-                    {p.darazUrl && (
+                    {p.darazUrl && p.syncStatus === "synced" && (
                       <a href={p.darazUrl} target="_blank" rel="noopener noreferrer">
                         <button>View on Daraz</button>
                       </a>
@@ -217,7 +228,7 @@ export default function Products() {
                   <Link to={`/products/${p.id}`}>
                     <button>{p.syncStatus === "unmapped" ? "Map category" : "Edit"}</button>
                   </Link>
-                  {p.darazUrl && (
+                  {p.darazUrl && p.syncStatus === "synced" && (
                     <a href={p.darazUrl} target="_blank" rel="noopener noreferrer">
                       <button>View on Daraz</button>
                     </a>
@@ -231,6 +242,8 @@ export default function Products() {
           })}
         </div>
       )}
+
+      <Pagination page={page} totalPages={totalPages} onChange={load} />
     </>
   );
 }
